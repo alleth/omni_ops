@@ -9,17 +9,39 @@ function MasterfileLogin() {
     const [loading, setLoading] = useState(false);
     const navigate = useNavigate();
 
+    // AUTO DETECT ENVIRONMENT — WORKS EVERYWHERE
+    const getApiBase = () => {
+        const origin = window.location.origin;
+
+        // Your PC (React dev server)
+        if (origin.includes('localhost:3000')) {
+            return 'http://omniops.local'; // Your PC → calls server API
+        }
+
+        // Server (production) — same domain, same port
+        return ''; // → becomes relative /api/... → same origin → NO CORS
+    };
+
+    // USE THIS EVERYWHERE
+    const API_BASE = getApiBase();
+
     const handleSubmit = async (e) => {
         e.preventDefault();
         setError('');
         setLoading(true);
 
         try {
-            const response = await fetch('http://omniops.local/api/user-tbl/login', {
+            const response = await fetch(`${API_BASE}/api/user-tbl/login`, {
                 method: 'POST',
                 credentials: 'include',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ user_name: username, user_pass: password }),
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                },
+                body: JSON.stringify({
+                    user_name: username,
+                    user_pass: password,
+                }),
             });
 
             const data = await response.json();

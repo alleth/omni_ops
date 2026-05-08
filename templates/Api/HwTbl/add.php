@@ -3,6 +3,30 @@
  * @var \App\View\AppView $this
  * @var \App\Model\Entity\HwTbl $hwTbl
  */
+
+// ── API/JSON detection ──
+// If this is an API request (from React, Postman, etc.), return JSON instead of HTML
+if ($this->request->accepts('application/json') || $this->request->getParam('_ext') === 'json') {
+    if ($this->viewVars['hwTbl'] && $this->viewVars['hwTbl']->id) {
+        // Success response
+        echo json_encode([
+            'success' => true,
+            'id' => $this->viewVars['hwTbl']->id,
+            'message' => 'The hw tbl has been saved.'
+        ]);
+    } else {
+        // Error response
+        echo json_encode([
+            'success' => false,
+            'message' => 'The hw tbl could not be saved. Please, try again.',
+            'errors' => $this->viewVars['hwTbl']->getErrors() ?? []
+        ]);
+    }
+    return; // Stop rendering HTML
+}
+
+// ── Normal web browser request ──
+// Render the original HTML form (your CRUD UI) — unchanged
 ?>
 <div class="row">
     <aside class="column">
@@ -17,42 +41,42 @@
             <fieldset>
                 <legend><?= __('Add Hw Tbl') ?></legend>
                 <?php
-                    echo $this->Form->control('region_name');
-                    echo $this->Form->control('site_code');
-                    echo $this->Form->control('major_type');
-                    echo $this->Form->control('sub_major_type');
-                    echo $this->Form->control('item_desc');
-                    echo $this->Form->control('hw_brand_name');
-                    echo $this->Form->control('hw_model');
-                    echo $this->Form->control('hw_asset_num');
-                    echo $this->Form->control('hw_serial_num');
-                    echo $this->Form->control('hw_date_acq');
-                    echo $this->Form->control('hw_acq_val');
-                    echo $this->Form->control('hw_status');
-                    echo $this->Form->control('hw_host_name');
-                    echo $this->Form->control('hw_ip_add');
-                    echo $this->Form->control('hw_mac_add');
-                    echo $this->Form->control('hw_user_name');
-                    echo $this->Form->control('hw_primary_role');
-                    echo $this->Form->control('hw_memory');
-                    echo $this->Form->control('hdd_capacity');
-                    echo $this->Form->control('hdd_free_space');
-                    echo $this->Form->control('hdd_health');
-                    echo $this->Form->control('os_type');
-                    echo $this->Form->control('core_buid');
-                    echo $this->Form->control('rsu_fac');
-                    echo $this->Form->control('mv_dto');
-                    echo $this->Form->control('mv_maint');
-                    echo $this->Form->control('ims_aiu');
-                    echo $this->Form->control('dl_dto');
-                    echo $this->Form->control('dl_maint');
-                    echo $this->Form->control('dotnet');
-                    echo $this->Form->control('hw_antivi');
-                    echo $this->Form->control('ports_num');
-                    echo $this->Form->control('ports_working');
-                    echo $this->Form->control('ports_deffect');
-                    echo $this->Form->control('hw_utilities');
-                    echo $this->Form->control('user_id');
+                echo $this->Form->control('region_name');
+                echo $this->Form->control('site_code');
+                echo $this->Form->control('major_type');
+                echo $this->Form->control('sub_major_type');
+                echo $this->Form->control('item_desc');
+                echo $this->Form->control('hw_brand_name');
+                echo $this->Form->control('hw_model');
+                echo $this->Form->control('hw_asset_num');
+                echo $this->Form->control('hw_serial_num');
+                echo $this->Form->control('hw_date_acq');
+                echo $this->Form->control('hw_acq_val');
+                echo $this->Form->control('hw_status');
+                echo $this->Form->control('hw_host_name');
+                echo $this->Form->control('hw_ip_add');
+                echo $this->Form->control('hw_mac_add');
+                echo $this->Form->control('hw_user_name');
+                echo $this->Form->control('hw_primary_role');
+                echo $this->Form->control('hw_memory');
+                echo $this->Form->control('hdd_capacity');
+                echo $this->Form->control('hdd_free_space');
+                echo $this->Form->control('hdd_health');
+                echo $this->Form->control('os_type');
+                echo $this->Form->control('core_buid');
+                echo $this->Form->control('rsu_fac');
+                echo $this->Form->control('mv_dto');
+                echo $this->Form->control('mv_maint');
+                echo $this->Form->control('ims_aiu');
+                echo $this->Form->control('dl_dto');
+                echo $this->Form->control('dl_maint');
+                echo $this->Form->control('dotnet');
+                echo $this->Form->control('hw_antivi');
+                echo $this->Form->control('ports_num');
+                echo $this->Form->control('ports_working');
+                echo $this->Form->control('ports_deffect');
+                echo $this->Form->control('hw_utilities');
+                echo $this->Form->control('user_id');
                 ?>
             </fieldset>
             <?= $this->Form->button(__('Submit')) ?>

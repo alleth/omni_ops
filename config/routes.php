@@ -80,6 +80,8 @@ return function (RouteBuilder $routes): void {
 
     $routes->scope('/api', ['prefix' => 'Api'], function (RouteBuilder $builder) {
         $builder->setExtensions(['json']);
+        // ← Add this one line to map POST to your add() action
+        $builder->post('/hw-tbl', ['controller' => 'HwTbl', 'action' => 'add']);
         $builder->fallbacks();
     });
 

@@ -13,3 +13,41 @@ code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;
 }
+
+/* Highlighted row after update */
+.highlighted-row {
+    background-color: #ecfdf5 !important; /* light green (or any color you prefer) */
+    animation: fadeHighlight 4s ease-out forwards;
+}
+
+@keyframes fadeHighlight {
+    0% {
+        background-color: #ecfdf5;
+    }
+    100% {
+        background-color: transparent;
+    }
+}
+
+/* Optional: dark mode version */
+.dark .highlighted-row {
+    background-color: #064e3b !important; /* darker green for dark mode */
+}
+
+
+.modal {
+    z-index: 1060 !important;
+}
+
+.modal-backdrop {
+    z-index: 1050 !important;
+}
+
+.modal-dialog {
+    margin: 1.75rem auto !important;
+}
+
+body.modal-open {
+    overflow: hidden !important;
+    padding-right: 0 !important; /* prevent layout shift */
+}

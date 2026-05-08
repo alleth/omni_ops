@@ -38,5 +38,9 @@ class SiteListTbl extends Entity
         'site_partnership' => true,
         'trxn_catered' => true,
         'cluster_name' => true,
+        'physical_site_count' => true, // ✅ THIS fixes your issue
+        'node_count' => true,
+        'node_working' => true,
+        'node_defective' => true,
     ];
 }

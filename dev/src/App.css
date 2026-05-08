@@ -28,11 +28,20 @@
   color: #61dafb;
 }
 
-@keyframes App-logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+
+.modal {
+    z-index: 1060 !important;
+}
+
+.modal-backdrop {
+    z-index: 1050 !important;
+}
+
+.modal-dialog {
+    margin: 1.75rem auto !important;
+}
+
+body.modal-open {
+    overflow: hidden !important;
+    padding-right: 0 !important; /* prevent layout shift */
 }
