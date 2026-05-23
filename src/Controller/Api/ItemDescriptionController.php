@@ -5,11 +5,6 @@ namespace App\Controller\Api;
 
 use App\Controller\AppController;
 
-/**
- * ItemDescription Controller
- *
- * @property \App\Model\Table\ItemDescriptionTable $ItemDescription
- */
 class ItemDescriptionController extends AppController
 {
     protected $ItemDescription;
@@ -24,8 +19,6 @@ class ItemDescriptionController extends AppController
     public function beforeFilter(\Cake\Event\EventInterface $event)
     {
         parent::beforeFilter($event);
-
-        // CORS — identical to RegionTblController
         $this->response = $this->response
             ->withHeader('Access-Control-Allow-Origin', 'http://localhost:3000')
             ->withHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, PUT, DELETE, OPTIONS')
@@ -41,9 +34,8 @@ class ItemDescriptionController extends AppController
         $this->request->allowMethod(['get']);
 
         if ($this->request->accepts('application/json')) {
-            // Return full list for API (no pagination limit)
             $itemDescription = $this->ItemDescription->find('all')
-                ->order(['item_id' => 'ASC']) // using item_id as primary key
+                ->order(['item_id' => 'ASC'])
                 ->toArray();
 
             return $this->response
@@ -51,7 +43,6 @@ class ItemDescriptionController extends AppController
                 ->withStringBody(json_encode(['itemDescription' => $itemDescription]));
         }
 
-        // Regular HTML CRUD view
         $itemDescription = $this->paginate($this->ItemDescription);
         $this->set(compact('itemDescription'));
     }
@@ -59,7 +50,6 @@ class ItemDescriptionController extends AppController
     public function view($id = null)
     {
         $this->request->allowMethod(['get']);
-
         $itemDescription = $this->ItemDescription->get($id, ['contain' => []]);
 
         if ($this->request->accepts('application/json')) {
@@ -76,7 +66,18 @@ class ItemDescriptionController extends AppController
         $itemDescription = $this->ItemDescription->newEmptyEntity();
         if ($this->request->is('post')) {
             $itemDescription = $this->ItemDescription->patchEntity($itemDescription, $this->request->getData());
-            if ($this->ItemDescription->save($itemDescription)) {
+            $saved = $this->ItemDescription->save($itemDescription);
+
+            if ($this->request->accepts('application/json')) {
+                if ($saved) {
+                    return $this->response->withType('json')
+                        ->withStringBody(json_encode(['success' => true, 'data' => $saved->toArray()]));
+                }
+                return $this->response->withStatus(422)->withType('json')
+                    ->withStringBody(json_encode(['success' => false, 'errors' => $itemDescription->getErrors()]));
+            }
+
+            if ($saved) {
                 $this->Flash->success(__('The item description has been saved.'));
                 return $this->redirect(['action' => 'index']);
             }
@@ -90,7 +91,18 @@ class ItemDescriptionController extends AppController
         $itemDescription = $this->ItemDescription->get($id, ['contain' => []]);
         if ($this->request->is(['patch', 'post', 'put'])) {
             $itemDescription = $this->ItemDescription->patchEntity($itemDescription, $this->request->getData());
-            if ($this->ItemDescription->save($itemDescription)) {
+            $saved = $this->ItemDescription->save($itemDescription);
+
+            if ($this->request->accepts('application/json')) {
+                if ($saved) {
+                    return $this->response->withType('json')
+                        ->withStringBody(json_encode(['success' => true, 'data' => $saved->toArray()]));
+                }
+                return $this->response->withStatus(422)->withType('json')
+                    ->withStringBody(json_encode(['success' => false, 'errors' => $itemDescription->getErrors()]));
+            }
+
+            if ($saved) {
                 $this->Flash->success(__('The item description has been saved.'));
                 return $this->redirect(['action' => 'index']);
             }
@@ -103,7 +115,18 @@ class ItemDescriptionController extends AppController
     {
         $this->request->allowMethod(['post', 'delete']);
         $itemDescription = $this->ItemDescription->get($id);
-        if ($this->ItemDescription->delete($itemDescription)) {
+        $deleted = $this->ItemDescription->delete($itemDescription);
+
+        if ($this->request->accepts('application/json')) {
+            if ($deleted) {
+                return $this->response->withType('json')
+                    ->withStringBody(json_encode(['success' => true]));
+            }
+            return $this->response->withStatus(422)->withType('json')
+                ->withStringBody(json_encode(['success' => false, 'error' => 'Could not delete this record.']));
+        }
+
+        if ($deleted) {
             $this->Flash->success(__('The item description has been deleted.'));
         } else {
             $this->Flash->error(__('The item description could not be deleted. Please, try again.'));

@@ -200,36 +200,54 @@ export default function AgingDetailsModal({
                                         </div>
                                     </div>
 
-                                    {/* Expanded: full item table */}
-                                    {isExpanded && (
-                                        <div className={`border-t ${isDarkMode ? 'border-gray-700' : 'border-gray-200'}`}>
-                                            <table className="w-full text-xs">
-                                                <thead>
-                                                    <tr className={isDarkMode ? 'bg-gray-800 text-gray-400' : 'bg-gray-50 text-gray-500'}>
-                                                        <th className="px-3 py-2 text-left font-medium">Site</th>
-                                                        <th className="px-3 py-2 text-left font-medium">Brand</th>
-                                                        <th className="px-3 py-2 text-left font-medium">Model</th>
-                                                        <th className="px-3 py-2 text-left font-medium">Acq. Date</th>
-                                                        <th className="px-3 py-2 text-left font-medium">Age</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    {items.map((item, idx) => (
-                                                        <tr
-                                                            key={idx}
-                                                            className={`border-t ${isDarkMode ? 'border-gray-700/50 even:bg-gray-800/30' : 'border-gray-100 even:bg-gray-50/60'}`}
-                                                        >
-                                                            <td className={`px-3 py-2 font-mono ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>{item.site_code}</td>
-                                                            <td className={`px-3 py-2 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>{item.brand}</td>
-                                                            <td className={`px-3 py-2 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>{item.model}</td>
-                                                            <td className={`px-3 py-2 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>{item.acq_date}</td>
-                                                            <td className="px-3 py-2 font-medium" style={{ color: ageBucketColor(item.ageYears) }}>{item.age}</td>
+                                    {/* Expanded: grouped by brand + model */}
+                                    {isExpanded && (() => {
+                                        // Group items by brand + model, keep oldest unit's date/age
+                                        const groupMap = {};
+                                        items.forEach(item => {
+                                            const key = `${item.brand.toLowerCase()}||${item.model.toLowerCase()}`;
+                                            if (!groupMap[key]) {
+                                                groupMap[key] = { brand: item.brand, model: item.model, count: 0, oldest: item };
+                                            }
+                                            groupMap[key].count++;
+                                        });
+                                        const grouped = Object.values(groupMap)
+                                            .sort((a, b) => b.oldest.ageYears - a.oldest.ageYears);
+
+                                        return (
+                                            <div className={`border-t ${isDarkMode ? 'border-gray-700' : 'border-gray-200'}`}>
+                                                <table className="w-full text-xs">
+                                                    <thead>
+                                                        <tr className={isDarkMode ? 'bg-gray-800 text-gray-400' : 'bg-gray-50 text-gray-500'}>
+                                                            <th className="px-3 py-2 text-center font-medium w-16">Total</th>
+                                                            <th className="px-3 py-2 text-left font-medium">Brand</th>
+                                                            <th className="px-3 py-2 text-left font-medium">Model</th>
+                                                            <th className="px-3 py-2 text-left font-medium">Oldest Acq. Date</th>
+                                                            <th className="px-3 py-2 text-left font-medium">Oldest Age</th>
                                                         </tr>
-                                                    ))}
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                    )}
+                                                    </thead>
+                                                    <tbody>
+                                                        {grouped.map((g, idx) => (
+                                                            <tr
+                                                                key={idx}
+                                                                className={`border-t ${isDarkMode ? 'border-gray-700/50 even:bg-gray-800/30' : 'border-gray-100 even:bg-gray-50/60'}`}
+                                                            >
+                                                                <td className="px-3 py-2 text-center">
+                                                                    <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold ${isDarkMode ? 'bg-gray-700 text-gray-200' : 'bg-gray-100 text-gray-800'}`}>
+                                                                        {g.count}
+                                                                    </span>
+                                                                </td>
+                                                                <td className={`px-3 py-2 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>{g.brand}</td>
+                                                                <td className={`px-3 py-2 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>{g.model}</td>
+                                                                <td className={`px-3 py-2 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>{g.oldest.acq_date}</td>
+                                                                <td className="px-3 py-2 font-medium" style={{ color: ageBucketColor(g.oldest.ageYears) }}>{g.oldest.age}</td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        );
+                                    })()}
                                 </div>
                             );
                         })

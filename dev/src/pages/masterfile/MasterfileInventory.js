@@ -244,12 +244,17 @@ function MasterfileInventory() {
         .filter(h => {
             if (!searchTerm) return true;
             const term = searchTerm.toLowerCase();
+            const site = siteMap[h.site_code];
+            const regionName = site ? (regionMap[String(site.region_id)] || '') : '';
             return (
-                (h.asset_num || '').toLowerCase().includes(term) ||
-                (h.serial_num || '').toLowerCase().includes(term) ||
+                (h.hw_asset_num || '').toLowerCase().includes(term) ||
+                (h.hw_serial_num || '').toLowerCase().includes(term) ||
                 (h.item_desc || '').toLowerCase().includes(term) ||
                 (h.hw_brand_name || '').toLowerCase().includes(term) ||
-                (h.hw_model || '').toLowerCase().includes(term)
+                (h.hw_model || '').toLowerCase().includes(term) ||
+                (h.site_code || '').toLowerCase().includes(term) ||
+                (site?.site_name || '').toLowerCase().includes(term) ||
+                regionName.toLowerCase().includes(term)
             );
         });
 
@@ -284,8 +289,15 @@ function MasterfileInventory() {
         'bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 ' +
         'focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 ' +
         'transition-colors appearance-none cursor-pointer ' +
-        'bg-no-repeat bg-[length:1.2em] bg-[right_1rem_center] ' +
         'disabled:opacity-60 disabled:cursor-not-allowed';
+
+    const selectStyle = {
+        backgroundImage: `url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8l4 4 4-4'/%3e%3c/svg%3e")`,
+        backgroundRepeat: 'no-repeat',
+        backgroundPosition: 'right 0.75rem center',
+        backgroundSize: '1.2em',
+        paddingRight: '2.5rem',
+    };
 
     // Checkbox selection logic – MAX 5 ITEMS + strict same site/type
     const toggleRowSelection = (item) => {
@@ -629,6 +641,7 @@ function MasterfileInventory() {
                                     value={selectedRegion}
                                     onChange={e => { setSelectedRegion(e.target.value); setSelectedSite(''); setCurrentPage(1); }}
                                     className={selectClasses}
+                                    style={selectStyle}
                                 >
                                     <option value="">All regions</option>
                                     {availableRegions.map(r => (
@@ -645,6 +658,7 @@ function MasterfileInventory() {
                                 onChange={e => { setSelectedSite(e.target.value); setCurrentPage(1); }}
                                 disabled={!selectedRegion && showRegionDropdown}
                                 className={`${selectClasses} disabled:opacity-50 disabled:cursor-not-allowed`}
+                                style={selectStyle}
                             >
                                 <option value="">All sites</option>
                                 {filteredSites.map(s => (
@@ -662,6 +676,7 @@ function MasterfileInventory() {
                                 onChange={e => { setSelectedType(e.target.value); setCurrentPage(1); }}
                                 disabled={isLoading}
                                 className={`${selectClasses} disabled:opacity-50 disabled:cursor-not-allowed`}
+                                style={selectStyle}
                             >
                                 <option value="">All types</option>
                                 {hwTypes.map(t => <option key={t} value={t}>{t}</option>)}
@@ -675,7 +690,7 @@ function MasterfileInventory() {
                                 value={searchTerm}
                                 onChange={e => { setSearchTerm(e.target.value); setCurrentPage(1); }}
                                 className="w-full px-3 py-2 text-sm rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 transition-colors"
-                                placeholder="Asset, serial, type…"
+                                placeholder="Asset, serial, type, brand, model, site…"
                             />
                         </div>
                     </div>
@@ -766,6 +781,7 @@ function MasterfileInventory() {
                                     value={rowsPerPage}
                                     onChange={e => { setRowsPerPage(Number(e.target.value)); setCurrentPage(1); }}
                                     className={selectClasses}
+                                    style={selectStyle}
                                 >
                                     {[10, 25, 50, 100, 200].map(n => (
                                         <option key={n} value={n}>{n}</option>
