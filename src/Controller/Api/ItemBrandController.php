@@ -19,10 +19,12 @@ class ItemBrandController extends AppController
     public function beforeFilter(\Cake\Event\EventInterface $event)
     {
         parent::beforeFilter($event);
+        $origin = $this->request->getHeaderLine('Origin') ?: '*';
         $this->response = $this->response
-            ->withHeader('Access-Control-Allow-Origin', 'http://localhost:3000')
+            ->withHeader('Access-Control-Allow-Origin', $origin)
             ->withHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, PUT, DELETE, OPTIONS')
-            ->withHeader('Access-Control-Allow-Headers', 'Content-Type');
+            ->withHeader('Access-Control-Allow-Headers', 'Content-Type')
+            ->withHeader('Vary', 'Origin');
 
         if ($this->request->is('options')) {
             return $this->response;
