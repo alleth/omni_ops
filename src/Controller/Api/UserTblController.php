@@ -22,36 +22,49 @@ class UserTblController extends AppController
     {
         parent::beforeFilter($event);
 
-        // Handle OPTIONS preflight – this must run FIRST and RETURN immediately
+        $origin = $this->request->getHeaderLine('Origin') ?: '*';
+
         if ($this->request->is('options')) {
-            $origin = $this->request->getHeaderLine('Origin') ?: 'http://localhost:3000';
-
-            $this->response = $this->response
-                ->withHeader('Access-Control-Allow-Origin', $origin)
-                ->withHeader('Access-Control-Allow-Credentials', 'true')  // string 'true'
-                ->withHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, PATCH, DELETE')
-                ->withHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With')
-                ->withHeader('Access-Control-Max-Age', '86400')
-                ->withStatus(204);  // 204 is REQUIRED for preflight success
-
-            return $this->response;  // STOP HERE - do not run other code
-        }
-
-        // For POST/GET - only if origin matches
-        $origin = $this->request->getHeaderLine('Origin');
-        $allowedOrigins = ['http://localhost:3000', 'http://omniops.local'];
-
-        if (in_array($origin, $allowedOrigins)) {
             $this->response = $this->response
                 ->withHeader('Access-Control-Allow-Origin', $origin)
                 ->withHeader('Access-Control-Allow-Credentials', 'true')
                 ->withHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, PATCH, DELETE')
                 ->withHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With')
-                ->withHeader('Access-Control-Max-Age', '86400');
+                ->withHeader('Access-Control-Max-Age', '86400')
+                ->withHeader('Vary', 'Origin')
+                ->withStatus(204);
+
+            return $this->response;
         }
+
+        $this->response = $this->response
+            ->withHeader('Access-Control-Allow-Origin', $origin)
+            ->withHeader('Access-Control-Allow-Credentials', 'true')
+            ->withHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, PATCH, DELETE')
+            ->withHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With')
+            ->withHeader('Vary', 'Origin');
     }
     public function index()
     {
+        $this->request->allowMethod(['get']);
+
+        if ($this->request->accepts('application/json')) {
+            $query = $this->UserTbl->find()->select([
+                'id', 'fname', 'lname', 'user_name', 'user_type',
+                'region_assigned', 'cluster_name',
+            ]);
+
+            $clusterName = $this->request->getQuery('cluster_name');
+            if ($clusterName) {
+                $query->where(['cluster_name LIKE' => '%' . trim($clusterName) . '%']);
+            }
+
+            $users = $query->order(['fname' => 'ASC', 'lname' => 'ASC'])->toArray();
+
+            return $this->response->withType('json')
+                ->withStringBody(json_encode(['users' => $users]));
+        }
+
         $userTbl = $this->paginate($this->UserTbl);
         $this->set(compact('userTbl'));
     }
@@ -65,6 +78,43 @@ class UserTblController extends AppController
 
     public function add()
     {
+        if ($this->request->is('post') && $this->request->accepts('application/json')) {
+            $data = $this->request->getData();
+
+            if (empty($data['user_pass'])) {
+                return $this->response->withStatus(400)->withType('json')
+                    ->withStringBody(json_encode(['success' => false, 'error' => 'Password is required']));
+            }
+
+            $data['user_pass'] = password_hash($data['user_pass'], PASSWORD_DEFAULT);
+            $data['failed_attempts'] = 0;
+
+            $userTbl = $this->UserTbl->newEntity($data);
+
+            if ($this->UserTbl->save($userTbl)) {
+                return $this->response->withType('json')
+                    ->withStringBody(json_encode([
+                        'success' => true,
+                        'message' => 'User created successfully',
+                        'user' => [
+                            'id'              => $userTbl->id,
+                            'fname'           => $userTbl->fname,
+                            'lname'           => $userTbl->lname,
+                            'user_name'       => $userTbl->user_name,
+                            'user_type'       => $userTbl->user_type,
+                            'region_assigned' => $userTbl->region_assigned,
+                            'cluster_name'    => $userTbl->cluster_name,
+                        ],
+                    ]));
+            }
+
+            return $this->response->withStatus(400)->withType('json')
+                ->withStringBody(json_encode([
+                    'success' => false,
+                    'errors'  => $userTbl->getErrors(),
+                ]));
+        }
+
         $userTbl = $this->UserTbl->newEmptyEntity();
         if ($this->request->is('post')) {
             $userTbl = $this->UserTbl->patchEntity($userTbl, $this->request->getData());
@@ -75,6 +125,39 @@ class UserTblController extends AppController
             $this->Flash->error(__('The user tbl could not be saved. Please, try again.'));
         }
         $this->set(compact('userTbl'));
+    }
+
+    public function resetPassword()
+    {
+        $this->request->allowMethod(['post']);
+
+        $data     = $this->request->getData();
+        $userId   = $data['user_id'] ?? null;
+        $newPass  = $data['new_password'] ?? null;
+
+        if (!$userId || !$newPass) {
+            return $this->response->withStatus(400)->withType('json')
+                ->withStringBody(json_encode(['success' => false, 'error' => 'user_id and new_password are required']));
+        }
+
+        try {
+            $user = $this->UserTbl->get($userId);
+        } catch (\Cake\Datasource\Exception\RecordNotFoundException $e) {
+            return $this->response->withStatus(404)->withType('json')
+                ->withStringBody(json_encode(['success' => false, 'error' => 'User not found']));
+        }
+
+        $user->user_pass      = password_hash($newPass, PASSWORD_DEFAULT);
+        $user->failed_attempts = 0;
+        $user->lockout_until  = null;
+
+        if ($this->UserTbl->save($user)) {
+            return $this->response->withType('json')
+                ->withStringBody(json_encode(['success' => true, 'message' => 'Password reset successfully']));
+        }
+
+        return $this->response->withStatus(400)->withType('json')
+            ->withStringBody(json_encode(['success' => false, 'error' => 'Could not reset password']));
     }
 
     public function edit($id = null)
@@ -198,9 +281,7 @@ class UserTblController extends AppController
                 ->withStringBody(json_encode(['error' => 'Invalid credentials']));
         }
 
-        return $response
-            ->withHeader('Access-Control-Allow-Origin', 'http://localhost:3000')
-            ->withHeader('Access-Control-Allow-Credentials', 'true');
+        return $response;
     }
 
     public function updateProfile()

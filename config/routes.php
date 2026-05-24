@@ -82,6 +82,8 @@ return function (RouteBuilder $routes): void {
         $builder->setExtensions(['json']);
         // ← Add this one line to map POST to your add() action
         $builder->post('/hw-tbl', ['controller' => 'HwTbl', 'action' => 'add']);
+        $builder->post('/user-tbl/add', ['controller' => 'UserTbl', 'action' => 'add']);
+        $builder->post('/user-tbl/reset-password', ['controller' => 'UserTbl', 'action' => 'resetPassword']);
         $builder->fallbacks();
     });
 
