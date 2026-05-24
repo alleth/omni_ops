@@ -449,7 +449,9 @@ function MasterfileUsers() {
                                         {u.cluster_name || '—'}
                                     </td>
                                     <td className="px-4 py-3 text-gray-500 dark:text-gray-400 text-xs max-w-xs truncate">
-                                        {formatRegions(u.region_assigned)}
+                                        {['ADM','ADMIN','ADMINISTRATOR','SPV','SUPERVISOR'].includes((u.user_type||'').toUpperCase())
+                                            ? '—'
+                                            : formatRegions(u.region_assigned)}
                                     </td>
                                     {canManage && (
                                         <td className="px-4 py-3">
