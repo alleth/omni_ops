@@ -8,7 +8,8 @@ OmniOps is a hardware asset management and inventory system built with a **CakeP
 
 - **Backend**: CakePHP 4.5 (PHP 7.4+) REST API with JSON responses
 - **Frontend**: React 19 SPA with React Router 7.9, React Bootstrap 2.10, TanStack React Table, Chart.js
-- **Styling**: Bootstrap 5 for layout; Tailwind utility class names used in JSX (`text-red-500`, `dark:bg-gray-900`, etc.) — **`tailwindcss` is not installed as an npm package**; add it if new components need Tailwind styles to apply.
+- **Styling**: Bootstrap 5 for layout; Tailwind utility class names used in JSX (`text-red-500`, `dark:bg-gray-900`, etc.) — **`tailwindcss` is not installed as an npm package** (config files `tailwind.config.js` and `postcss.config.js` exist, but the package itself is absent from `package.json`); run `npm install -D tailwindcss` if new components need Tailwind styles to apply.
+- **Icons**: Two libraries are in use — `@heroicons/react` v2 (used in most page components) and `react-icons` v5 (`react-icons/hi` HeroIcons variant, used in `MasterfileLayout.js` sidebar/nav). Both are installed; match whichever the file already uses.
 - **Database**: MySQL via PDO
 - **Dev Environment**: XAMPP (Apache), Node.js
 
@@ -121,6 +122,7 @@ Key endpoints:
 - `POST /api/user-tbl/reset-password.json` — reset user password (`user_id` required in body)
 - `GET /api/request-tbl.json` — hardware requests; query params: `requested_by`, `status` (PENDING/APPROVED/REJECTED/CANCELED), `cluster_name`
 - `POST /api/request-tbl.json` — create request (multipart/form-data, supports file uploads); `request_type` is `PULL_OUT` or `RELOCATION`
+- `POST /api/request-tbl/updateAttachment/:id.json` — replace attachment on an existing request (SPV only; multipart/form-data)
 - `GET /api/item-brand.json`, `GET /api/item-description.json`, `GET /api/item-models.json` — cascading dropdown data
 
 Standard response shapes:
@@ -180,6 +182,7 @@ Protected routes:
 - PDF reports use jsPDF, pdf-lib, and react-pdf; `BulkRequestModal` generates PDFs client-side using pdf-lib. PULL_OUT form collects: delivery method, tracking number, delivered by, pickup date, and a pullout form file. RELOCATION form collects: service request no., date, return date, reason, from/to accountable persons, and transfer site code.
 - Dark mode reads system preference via `window.matchMedia('(prefers-color-scheme: dark)')` as initial value, then persists toggle to `localStorage.darkMode`; applies by adding `dark` class to `document.documentElement`
 - The 15-minute session timer (`dev/src/utils/session.js`) creates its modal imperatively via `document.createElement` — it is not a React component
+- Bulk action buttons in `MasterfileDashboard` (Approve for SPV, Cancel/Delete for FSE) are stubs — they currently call `alert()` / `window.confirm()` and do not make API requests. The UI scaffolding exists but the API wiring is not yet implemented.
 - `MasterfileInventory` shows toast notifications for add/edit/delete actions and skeleton loaders (`SkeletonRow`, `SkeletonTableCard`) during data fetch
 
 ## Deployment
