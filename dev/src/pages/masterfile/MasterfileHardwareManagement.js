@@ -1,6 +1,8 @@
 // src/pages/masterfile/MasterfileHardwareManagement.js
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { ArrowDownTrayIcon } from '@heroicons/react/24/outline';
+import * as XLSX from 'xlsx';
 import { useApi } from '../../hooks/useApi';
 
 const getModalRoot = () =>
@@ -1039,6 +1041,110 @@ function MasterfileHardwareManagement() {
         setSelected(s => s ? { ...s, ...updatedRow } : s);
     };
 
+    const generateExcelReport = () => {
+        if (!filtered.length) return;
+
+        const commonHeaders = ['Region', 'Site Code', 'Site Name', 'Asset #', 'Serial #', 'Brand', 'Model'];
+        const commonExtract = row => {
+            const site = siteMap[row.site_code];
+            const regionName = regionMap[row.region_name] || row.region_name || '';
+            return [
+                regionName,
+                row.site_code || '',
+                site?.site_name || '',
+                row.hw_asset_num || '',
+                row.hw_serial_num || '',
+                row.hw_brand_name || '',
+                row.hw_model || '',
+            ];
+        };
+
+        let headers = [];
+        let extractRow;
+
+        if (filterHwCategory === 'CPU') {
+            if (cpuView === 'os_antivirus') {
+                headers = [...commonHeaders, 'OS Type', 'Antivirus', '.NET Framework'];
+                extractRow = row => [...commonExtract(row), row.os_type || '', row.hw_antivi || '', row.dotnet || ''];
+            } else if (cpuView === 'core_facilities') {
+                headers = [...commonHeaders, 'Core Build', 'Facilities Installed'];
+                extractRow = row => [
+                    ...commonExtract(row),
+                    (row.core_buid || '').split(',').map(s => s.trim()).filter(Boolean).join(', '),
+                    installedFacilities(row).join(', '),
+                ];
+            } else if (cpuView === 'hostname_ip_mac') {
+                headers = [...commonHeaders, 'Hostname', 'IP Address', 'MAC Address'];
+                extractRow = row => [...commonExtract(row), row.hw_host_name || '', row.hw_ip_add || '', row.hw_mac_add || ''];
+            } else if (cpuView === 'workstep_user') {
+                headers = [...commonHeaders, 'Primary Role', 'Assigned User'];
+                extractRow = row => [...commonExtract(row), row.hw_primary_role || '', row.hw_user_name || ''];
+            } else {
+                headers = [...commonHeaders, 'Memory', 'HDD Health (%)', 'HDD Capacity', 'Free Space', 'Acq. Date', 'Age'];
+                extractRow = row => {
+                    const health = hddHealthBadge(row.hdd_capacity, row.hdd_free_space);
+                    return [...commonExtract(row), row.hw_memory || '', health.label, row.hdd_capacity || '', row.hdd_free_space || '', row.hw_date_acq || '', formatAge(computeAge(row.hw_date_acq))];
+                };
+            }
+        } else if (filterHwCategory === 'SERVER') {
+            if (serverView === 'os_av_net') {
+                headers = [...commonHeaders, 'OS Type', 'Antivirus', '.NET Framework'];
+                extractRow = row => [...commonExtract(row), row.os_type || '', row.hw_antivi || '', row.dotnet || ''];
+            } else if (serverView === 'hostname_ip_mac') {
+                headers = [...commonHeaders, 'Hostname', 'IP Address', 'MAC Address'];
+                extractRow = row => [...commonExtract(row), row.hw_host_name || '', row.hw_ip_add || '', row.hw_mac_add || ''];
+            } else {
+                headers = [...commonHeaders, 'Memory', 'HDD Health (%)', 'HDD Capacity', 'Free Space', 'Acq. Date', 'Age'];
+                extractRow = row => {
+                    const health = hddHealthBadge(row.hdd_capacity, row.hdd_free_space);
+                    return [...commonExtract(row), row.hw_memory || '', health.label, row.hdd_capacity || '', row.hdd_free_space || '', row.hw_date_acq || '', formatAge(computeAge(row.hw_date_acq))];
+                };
+            }
+        } else if (filterHwCategory === 'SWITCH') {
+            headers = [...commonHeaders, 'Working Ports', 'Defective Ports', 'Total Ports', 'Acq. Date', 'Age'];
+            extractRow = row => {
+                const total    = parseInt(row.ports_num) || 0;
+                const defective = parseInt(row.ports_def) || 0;
+                return [...commonExtract(row), total - defective || '', defective || '', total || '', row.hw_date_acq || '', formatAge(computeAge(row.hw_date_acq))];
+            };
+        } else {
+            headers = [...commonHeaders, 'Item Type', 'IP Address', 'OS Type', 'Memory', 'HDD Health (%)', 'Acq. Date', 'Age'];
+            extractRow = row => {
+                const health = hddHealthBadge(row.hdd_capacity, row.hdd_free_space);
+                return [...commonExtract(row), row.item_desc || '', row.hw_ip_add || '', row.os_type || '', row.hw_memory || '', health.label, row.hw_date_acq || '', formatAge(computeAge(row.hw_date_acq))];
+            };
+        }
+
+        const rows = filtered.map(extractRow);
+        const wsData = [headers, ...rows];
+
+        // Auto column widths
+        const colWidths = headers.map((h, ci) => {
+            const max = rows.reduce((m, r) => Math.max(m, String(r[ci] || '').length), h.length);
+            return { wch: Math.min(Math.max(max + 2, 12), 45) };
+        });
+
+        const wb = XLSX.utils.book_new();
+        const ws = XLSX.utils.aoa_to_sheet(wsData);
+        ws['!cols'] = colWidths;
+
+        const categoryLabel = filterHwCategory || 'All';
+        const subLabel = filterHwCategory === 'CPU'
+            ? CPU_VIEWS.find(v => v.value === cpuView)?.label
+            : filterHwCategory === 'SERVER'
+                ? SERVER_VIEWS.find(v => v.value === serverView)?.label
+                : null;
+        const sheetName = subLabel ? subLabel.slice(0, 31) : categoryLabel;
+        XLSX.utils.book_append_sheet(wb, ws, sheetName);
+
+        const regionLabel = filterRegion ? (regionMap[filterRegion] || filterRegion).replace(/[^a-zA-Z0-9]/g, '_') : 'AllRegions';
+        const siteLabel   = filterSite ? `_${filterSite}` : '';
+        const dateStr     = new Date().toISOString().slice(0, 10);
+        const filename    = `Hardware_${categoryLabel}${subLabel ? '_' + subLabel.replace(/[^a-zA-Z0-9]/g, '_') : ''}_${regionLabel}${siteLabel}_${dateStr}.xlsx`;
+
+        XLSX.writeFile(wb, filename);
+    };
+
     if (loadError) {
         return <div className="p-6 text-center text-sm text-red-500 dark:text-red-400">{loadError}</div>;
     }
@@ -1456,6 +1562,15 @@ function MasterfileHardwareManagement() {
                         </p>
                     )}
                 </div>
+                {!loading && filtered.length > 0 && (
+                    <button
+                        onClick={generateExcelReport}
+                        className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800/50 rounded-lg hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-colors"
+                    >
+                        <ArrowDownTrayIcon className="w-4 h-4" />
+                        Generate Report
+                    </button>
+                )}
             </div>
 
             {/* Filters */}
