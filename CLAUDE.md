@@ -117,6 +117,8 @@ Key endpoints:
 - `GET /api/hw-tbl/site/:site_code.json` — hardware filtered by site code
 - `GET /api/site-list-tbl.json`, `GET /api/region-tbl.json` — reference data
 - `POST /api/site-list-tbl/add.json`, `POST /api/site-list-tbl/edit/:id.json`, `POST /api/site-list-tbl/delete/:id.json` — site CRUD (non-REST named actions)
+- `POST /api/user-tbl/add.json` — create new user (name, username, password, region assignment)
+- `POST /api/user-tbl/reset-password.json` — reset user password (`user_id` required in body)
 - `GET /api/request-tbl.json` — hardware requests; query params: `requested_by`, `status` (PENDING/APPROVED/REJECTED/CANCELED), `cluster_name`
 - `POST /api/request-tbl.json` — create request (multipart/form-data, supports file uploads); `request_type` is `PULL_OUT` or `RELOCATION`
 - `GET /api/item-brand.json`, `GET /api/item-description.json`, `GET /api/item-models.json` — cascading dropdown data
@@ -140,7 +142,7 @@ Protected routes:
 - `/masterfile/inventory` → `MasterfileInventory` (hardware table with bulk request; default 10 rows/page)
 - `/masterfile/management` → `MasterfileHardwareManagement` (hardware aging table: age computation, HDD health badges, `PAGE_SIZE=30`). CPU rows have a sub-view toggle: `os_facilities`, `hostname_ip_mac`, `workstep_user`, `hdd_age`. `CONFIG_FIELDS` per category (CPU/SERVER/SWITCH) defines which fields count toward config completeness. `installedFacilities()` maps boolean DB columns (`rsu_fac`, `mv_dto`, `mv_maint`, `ims_aiu`, `dl_dto`, `dl_maint`, `dotnet`) to display labels.
 - `/masterfile/directory` → `MasterfileDirectory` (site directory with TanStack Table v8 + `SiteDetailsModal`; global filter across site_code, site_name, office_type, address, trxn_catered, ownership, region)
-- `/masterfile/users` → `MasterfileUsers` (**stub — not implemented**)
+- `/masterfile/users` → `MasterfileUsers` (user management table; SPV can add new FSE users scoped to their cluster and reset passwords; ADM is read-only but can also reset passwords; FSE has no access)
 - `/masterfile/profile` → `MasterfileProfile` (password change, profile edit; save only enabled when fields actually changed)
 
 ### Data Flow
@@ -157,8 +159,8 @@ Protected routes:
 `user_type` controls both data scope and UI capabilities. The roles are **not a hierarchy** — FSE is the editing role, while ADM/SPV have broader data scope but are read-only for hardware records.
 
 - `FSE` (default) — can add hardware, edit hardware, create bulk pull-out/relocation requests; scoped to their `region_assigned` IDs. No Users management tab.
-- `ADM` — read-only in inventory/management views; full data scope if `cluster_name === 'All Cluster'` (all regions), otherwise same region scoping as FSE. Sees Users tab. In `AddHardwareModal`, matched as `['ADM', 'ADMIN', 'ADMINISTRATOR']`.
-- `SPV` / `SUPERVISOR` — read-only in inventory; scoped to all regions sharing their `cluster_name`. Sees Users tab.
+- `ADM` — read-only in inventory/management views; full data scope if `cluster_name === 'All Cluster'` (all regions), otherwise same region scoping as FSE. In Users tab: read-only list + can reset any user's password. In `AddHardwareModal`, matched as `['ADM', 'ADMIN', 'ADMINISTRATOR']`.
+- `SPV` / `SUPERVISOR` — read-only in inventory; scoped to all regions sharing their `cluster_name`. In Users tab: can add new FSE users scoped to their cluster and reset passwords; region column is hidden for SPV.
 
 `region_assigned` is a comma-separated string of region IDs; the inventory page filters hardware to the user's assigned regions. ADM with `cluster_name === 'All Cluster'` bypasses this filter entirely.
 

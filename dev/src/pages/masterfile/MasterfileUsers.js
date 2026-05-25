@@ -38,10 +38,11 @@ function SkeletonRow({ cols }) {
 
 // ─── Add User Modal ──────────────────────────────────────────────────────────
 
-function AddUserModal({ onClose, onSave, spvCluster, regionOptions }) {
+function AddUserModal({ onClose, onSave, spvCluster, regionOptions, isADM }) {
     const [form, setForm] = useState({
         fname: '', lname: '', user_name: '', user_pass: '', confirm_pass: '',
-        user_type: 'FSE', region_assigned: '',
+        user_type: isADM ? 'ADM' : 'FSE',
+        cluster_name: isADM ? 'All Cluster' : '',
     });
     const [selectedRegions, setSelectedRegions] = useState([]);
     const [errors, setErrors]   = useState({});
@@ -71,9 +72,9 @@ function AddUserModal({ onClose, onSave, spvCluster, regionOptions }) {
             lname:           form.lname.trim(),
             user_name:       form.user_name.trim(),
             user_pass:       form.user_pass,
-            user_type:       'FSE',
-            cluster_name:    spvCluster,
-            region_assigned: selectedRegions.map(r => r.value).join(','),
+            user_type:       form.user_type,
+            cluster_name:    form.user_type === 'ADM' ? 'All Cluster' : (isADM ? form.cluster_name : spvCluster),
+            region_assigned: form.user_type === 'ADM' ? '' : selectedRegions.map(r => r.value).join(','),
         });
         setSaving(false);
     };
@@ -134,31 +135,56 @@ function AddUserModal({ onClose, onSave, spvCluster, regionOptions }) {
 
                     <div>
                         <label className={labelCls}>Role</label>
-                        <input type="text" value="FSE" disabled
-                            className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg text-sm bg-gray-50 dark:bg-gray-700/50 text-gray-500 dark:text-gray-400 cursor-not-allowed" />
+                        {isADM ? (
+                            <select
+                                className={inputCls}
+                                value={form.user_type}
+                                onChange={e => {
+                                    const r = e.target.value;
+                                    setForm(p => ({ ...p, user_type: r, cluster_name: r === 'ADM' ? 'All Cluster' : '' }));
+                                    if (r === 'ADM') setSelectedRegions([]);
+                                }}
+                            >
+                                <option value="ADM">ADM (Administrator)</option>
+                                <option value="FSE">FSE (Field Service Engineer)</option>
+                            </select>
+                        ) : (
+                            <input type="text" value="FSE" disabled
+                                className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg text-sm bg-gray-50 dark:bg-gray-700/50 text-gray-500 dark:text-gray-400 cursor-not-allowed" />
+                        )}
                     </div>
 
                     <div>
                         <label className={labelCls}>Cluster</label>
-                        <input type="text" value={spvCluster || ''} disabled
-                            className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg text-sm bg-gray-50 dark:bg-gray-700/50 text-gray-500 dark:text-gray-400 cursor-not-allowed" />
+                        {isADM && form.user_type === 'FSE' ? (
+                            <input type="text" className={inputCls} value={form.cluster_name}
+                                onChange={e => set('cluster_name', e.target.value)}
+                                placeholder="e.g. NCR Cluster" />
+                        ) : (
+                            <input type="text"
+                                value={isADM ? 'All Cluster' : (spvCluster || '')}
+                                disabled
+                                className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg text-sm bg-gray-50 dark:bg-gray-700/50 text-gray-500 dark:text-gray-400 cursor-not-allowed" />
+                        )}
                     </div>
 
-                    <div>
-                        <label className={labelCls}>Region Assigned</label>
-                        <Select
-                            isMulti
-                            options={regionOptions}
-                            value={selectedRegions}
-                            onChange={setSelectedRegions}
-                            placeholder="Select regions..."
-                            classNamePrefix="react-select"
-                            styles={{
-                                control: (b) => ({ ...b, minHeight: 38, fontSize: 14 }),
-                                menu:    (b) => ({ ...b, zIndex: 9999 }),
-                            }}
-                        />
-                    </div>
+                    {(!isADM || form.user_type === 'FSE') && (
+                        <div>
+                            <label className={labelCls}>Region Assigned</label>
+                            <Select
+                                isMulti
+                                options={regionOptions}
+                                value={selectedRegions}
+                                onChange={setSelectedRegions}
+                                placeholder="Select regions..."
+                                classNamePrefix="react-select"
+                                styles={{
+                                    control: (b) => ({ ...b, minHeight: 38, fontSize: 14 }),
+                                    menu:    (b) => ({ ...b, zIndex: 9999 }),
+                                }}
+                            />
+                        </div>
+                    )}
 
                     <div className="flex gap-3 pt-2">
                         <button type="button" onClick={onClose}
@@ -385,16 +411,13 @@ function MasterfileUsers() {
                             : `Users in ${user.cluster_name || 'your'} cluster`}
                     </p>
                 </div>
-                {isSPV && (
+                {(isSPV || isADM) && (
                     <button
                         onClick={() => setShowAddModal(true)}
                         className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium transition-colors shadow-sm"
                     >
                         + Add User
                     </button>
-                )}
-                {isADM && (
-                    <span className="text-xs text-gray-400 dark:text-gray-500 italic">Read-only · can reset passwords</span>
                 )}
             </div>
 
@@ -494,6 +517,7 @@ function MasterfileUsers() {
                     onSave={handleAddUser}
                     spvCluster={user.cluster_name}
                     regionOptions={regionOptions}
+                    isADM={isADM}
                 />
             )}
             {showResetModal && selectedUser && (
