@@ -199,9 +199,28 @@ function MasterfileDashboard() {
 
     const managementAccuracy = useMemo(() => {
         const total = onSite.length;
-        if (!total) return { pct: 0, total: 0, withDate: 0, missing: 0 };
+        if (!total) return { pct: 0, total: 0, complete: 0, incomplete: 0, withDate: 0, missing: 0 };
+        // Configuration completeness across the key management fields — not just the
+        // acquisition date. The percentage is the share of filled cells across all
+        // tracked fields, so partially-configured records still move the needle
+        // instead of the card being pinned to the acq-date coverage alone.
+        const MGMT_FIELDS = ['os_type', 'hw_host_name', 'hw_ip_add', 'hw_mac_add', 'hw_memory', 'hdd_capacity', 'hw_date_acq'];
+        let filledCells = 0;
+        let completeRecords = 0;
+        onSite.forEach(h => {
+            const filled = MGMT_FIELDS.filter(f => validField(h[f])).length;
+            filledCells += filled;
+            if (filled === MGMT_FIELDS.length) completeRecords++;
+        });
         const withDate = onSite.filter(hasAcqDate).length;
-        return { pct: Math.round((withDate / total) * 100), total, withDate, missing: total - withDate };
+        return {
+            pct: Math.round((filledCells / (total * MGMT_FIELDS.length)) * 100),
+            total,
+            complete: completeRecords,
+            incomplete: total - completeRecords,
+            withDate,
+            missing: total - withDate,
+        };
     }, [onSite]);
 
     const directoryAccuracy = useMemo(() => {
@@ -463,9 +482,9 @@ function MasterfileDashboard() {
                             icon={<Icon d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />}
                         >
                             <Stat label="On-site assets" value={managementAccuracy.total.toLocaleString()} />
-                            <Stat label="Aging data ready" value={managementAccuracy.withDate.toLocaleString()} color="text-emerald-600 dark:text-emerald-400" />
-                            <Stat label="No acq. date" value={managementAccuracy.missing.toLocaleString()}
-                                color={managementAccuracy.missing > 0 ? 'text-amber-500 dark:text-amber-400' : 'text-gray-500'} />
+                            <Stat label="Fully configured" value={managementAccuracy.complete.toLocaleString()} color="text-emerald-600 dark:text-emerald-400" />
+                            <Stat label="Needs config" value={managementAccuracy.incomplete.toLocaleString()}
+                                color={managementAccuracy.incomplete > 0 ? 'text-amber-500 dark:text-amber-400' : 'text-gray-500'} />
                         </AccuracyCard>
 
                         <AccuracyCard

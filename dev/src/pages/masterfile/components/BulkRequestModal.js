@@ -148,8 +148,11 @@ const BulkRequestModal = ({
         if (transferToSiteCode === fromSiteCode) return alert('Cannot relocate to the same site.');
 
         try {
-            const templateUrl = '/public/templates/field-relocate-template.pdf';
-            const templateBytes = await fetch(templateUrl).then(res => res.arrayBuffer());
+            const templateUrl = `${process.env.PUBLIC_URL || ''}/templates/field-relocate-template.pdf`;
+            const templateBytes = await fetch(templateUrl).then(res => {
+                if (!res.ok) throw new Error(`Relocation template not found at ${templateUrl} (${res.status} ${res.statusText})`);
+                return res.arrayBuffer();
+            });
             const pdfDoc = await PDFDocument.load(templateBytes);
 
             const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
@@ -240,7 +243,7 @@ const BulkRequestModal = ({
         if (!serviceRequestDate.trim()) return alert('Please select Service Request Date');
         if (!returnDate.trim()) return alert('Please select Return Date');
 
-        const templateUrl = '/public/templates/field-return-template.pdf';
+        const templateUrl = `${process.env.PUBLIC_URL || ''}/templates/field-return-template.pdf`;
 
         try {
             const templateBytes = await fetch(templateUrl).then(res => {

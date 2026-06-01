@@ -141,10 +141,10 @@ React Router with `basename="/public"`. Public routes: `/`, `/masterfile`, `/mas
 
 Protected routes:
 - `/masterfile/home` → `MasterfileDashboard` (request overview, role-filtered)
-- `/masterfile/inventory` → `MasterfileInventory` (hardware table with bulk request; default 10 rows/page)
-- `/masterfile/management` → `MasterfileHardwareManagement` (hardware aging table: age computation, HDD health badges, `PAGE_SIZE=30`). CPU rows have a sub-view toggle: `os_facilities`, `hostname_ip_mac`, `workstep_user`, `hdd_age`. `CONFIG_FIELDS` per category (CPU/SERVER/SWITCH) defines which fields count toward config completeness. `installedFacilities()` maps boolean DB columns (`rsu_fac`, `mv_dto`, `mv_maint`, `ims_aiu`, `dl_dto`, `dl_maint`, `dotnet`) to display labels.
+- `/masterfile/inventory` → `MasterfileInventory` (hardware table with bulk request; default 10 rows/page). Includes accuracy report cards, each opening a modal overlay: **Profile Accuracy** (per-field completeness breakdown for asset/serial/type/brand/model/OS, with OS scoped to CPU/PC items), **Duplicate Entries** (duplicate asset/serial groups among On Site hardware), and **Pull-Out Attachment Coverage** (hardware missing a pull-out form on file; supports viewing/uploading an attachment for legacy records).
+- `/masterfile/management` → `MasterfileHardwareManagement` (hardware aging table: age computation, HDD health badges, `PAGE_SIZE=30`). CPU rows have a sub-view toggle: `os_facilities`, `hostname_ip_mac`, `workstep_user`, `hdd_age`. `CONFIG_FIELDS` per category (CPU/SERVER/SWITCH) defines which fields count toward config completeness. `installedFacilities()` maps boolean DB columns (`rsu_fac`, `mv_dto`, `mv_maint`, `ims_aiu`, `dl_dto`, `dl_maint`, `dotnet`) to display labels. A "Generate Report" button exports the currently filtered rows to Excel via the `xlsx` (SheetJS) package — exported columns match the active hardware type and sub-view, all active filters (region/site/search/type/sub-view) apply, and the filename encodes type/region/date.
 - `/masterfile/directory` → `MasterfileDirectory` (site directory with TanStack Table v8 + `SiteDetailsModal`; global filter across site_code, site_name, office_type, address, trxn_catered, ownership, region)
-- `/masterfile/users` → `MasterfileUsers` (user management table; SPV can add new FSE users scoped to their cluster and reset passwords; ADM is read-only but can also reset passwords; FSE has no access)
+- `/masterfile/users` → `MasterfileUsers` (user management table; SPV can add new FSE users scoped to their cluster and reset passwords; ADM can add new users as either ADM or FSE (role dropdown) and reset passwords; FSE has no access)
 - `/masterfile/profile` → `MasterfileProfile` (password change, profile edit; save only enabled when fields actually changed)
 
 ### Data Flow
@@ -161,7 +161,7 @@ Protected routes:
 `user_type` controls both data scope and UI capabilities. The roles are **not a hierarchy** — FSE is the editing role, while ADM/SPV have broader data scope but are read-only for hardware records.
 
 - `FSE` (default) — can add hardware, edit hardware, create bulk pull-out/relocation requests; scoped to their `region_assigned` IDs. No Users management tab.
-- `ADM` — read-only in inventory/management views; full data scope if `cluster_name === 'All Cluster'` (all regions), otherwise same region scoping as FSE. In Users tab: read-only list + can reset any user's password. In `AddHardwareModal`, matched as `['ADM', 'ADMIN', 'ADMINISTRATOR']`.
+- `ADM` — read-only in inventory/management views; full data scope if `cluster_name === 'All Cluster'` (all regions), otherwise same region scoping as FSE. In Users tab: can reset any user's password and add new users via a role dropdown (ADM or FSE) — for a new ADM, cluster auto-sets to `'All Cluster'` and the Region Assigned field is hidden; for a new FSE, cluster and region are editable. In `AddHardwareModal`, matched as `['ADM', 'ADMIN', 'ADMINISTRATOR']`.
 - `SPV` / `SUPERVISOR` — read-only in inventory; scoped to all regions sharing their `cluster_name`. In Users tab: can add new FSE users scoped to their cluster and reset passwords; region column is hidden for SPV.
 
 `region_assigned` is a comma-separated string of region IDs; the inventory page filters hardware to the user's assigned regions. ADM with `cluster_name === 'All Cluster'` bypasses this filter entirely.

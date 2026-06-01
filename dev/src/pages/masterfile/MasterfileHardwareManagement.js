@@ -87,13 +87,26 @@ function isValidIp(val) {
 
 function isValidMac(val) {
     const v = (val || '').trim();
-    return /^([0-9A-Fa-f]{2}[:\-]){5}[0-9A-Fa-f]{2}$/.test(v);
+    if (!v) return false;
+    // Accept any common separator (colon, hyphen, dot) or none at all —
+    // count the hex digits rather than enforcing a single canonical format,
+    // otherwise valid MACs entered without separators get excluded from accuracy.
+    if (!/^[0-9A-Fa-f.:\- ]+$/.test(v)) return false;
+    return v.replace(/[^0-9A-Fa-f]/g, '').length === 12;
 }
+
+// Stored placeholder strings (written by the inventory add/edit flow) that should
+// be treated as "no value" — so they don't inflate completeness, show in the table,
+// or get retained when the user supplies real data in a multi-value field.
+const PLACEHOLDER_VALUES = new Set(['not set', 'n/a', 'na', 'null', 'no tag', 'unreadable', 'tbd', '-', '—']);
+const isPlaceholderVal = (v) => PLACEHOLDER_VALUES.has(String(v ?? '').trim().toLowerCase());
+const cleanVal = (v) => (isPlaceholderVal(v) ? '' : (v ?? ''));
 
 function isFieldFilled(key, val) {
     if (val === null || val === undefined) return false;
     const s = String(val).trim();
     if (s === '' || s === '0') return false;
+    if (isPlaceholderVal(s)) return false;
     if (key === 'hw_ip_add')  return isValidIp(s);
     if (key === 'hw_mac_add') return isValidMac(s);
     if (key === 'dotnet')     return DOTNET_OPTIONS.includes(s);
@@ -222,7 +235,7 @@ const BOOL_SAVE_FIELDS  = new Set(['rsu_fac', 'mv_dto', 'mv_maint', 'ims_aiu', '
 const DOTNET_OPTIONS    = ['v2.0', 'v3.5', 'v4.0', 'v4.5', 'v4.6', 'v4.6.1', 'v4.7', 'v4.7.1', 'v4.7.2', 'v4.8', 'v4.8.1', 'Not Installed'];
 const OS_TYPE_OPTIONS        = ['Windows XP', 'Windows 7', 'Windows 10 32-Bit', 'Windows 10 64-Bit', 'Windows 11'];
 const OS_SERVER_TYPE_OPTIONS = ['Windows Server 2003', 'Windows Server 2008', 'Windows Server 2008 R2', 'Windows Server 2012', 'Windows Server 2012 R2', 'Windows Server 2016', 'Windows Server 2019', 'Windows Server 2022', 'Windows Server 2025'];
-const WORKSTEP_OPTIONS  = ['Evaluator', 'Data Encoder', 'PhotoSig', 'InputClerk', 'Approving Officer', 'Hearing Officer', 'Cashier', 'Releasing'];
+const WORKSTEP_OPTIONS  = ['Evaluator', 'Data Encoder', 'PhotoSig', 'InputClerk', 'Approving Officer', 'Hearing Officer', 'Cashier', 'Releasing', 'D.I.Y.', 'DL Examiner', 'SSP'];
 const MEMORY_OPTIONS     = ['2GB', '4GB', '6GB', '8GB', '12GB', '16GB', '24GB', '32GB', '48GB', '64GB', '128GB', '256GB'];
 const HDD_CAP_OPTIONS    = ['120GB', '128GB', '160GB', '240GB', '256GB', '320GB', '500GB', '512GB', '1TB', '2TB', '4TB', '8TB'];
 
@@ -376,7 +389,16 @@ const ChevronDown = () => (
 // ─── Config Modal ─────────────────────────────────────────────────────────────
 function ConfigModal({ hw, siteMap, regionMap, cpuView, serverView, onClose, onSaved }) {
     const { postData, loading: saving } = useApi();
-    const [form, setForm]       = useState({ ...hw });
+    const [form, setForm]       = useState(() => {
+        // Strip stored placeholders ("Not Set", etc.) on open so they don't linger
+        // in inputs — especially the comma-joined multi-value fields, where a leftover
+        // "Not Set" would otherwise be kept alongside newly checked options on save.
+        const f = { ...hw };
+        ['hw_host_name', 'hw_ip_add', 'hw_mac_add', 'hw_user_name', 'hw_primary_role', 'core_buid'].forEach(k => {
+            if (isPlaceholderVal(f[k])) f[k] = '';
+        });
+        return f;
+    });
     const [saveError, setSaveError] = useState(null);
     const [saved,     setSaved]     = useState(false);
 
@@ -433,11 +455,9 @@ function ConfigModal({ hw, siteMap, regionMap, cpuView, serverView, onClose, onS
     return createPortal(
         <div
             className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
-            onClick={onClose}
         >
             <div
                 className="relative w-full max-w-2xl rounded-2xl shadow-2xl ring-1 ring-gray-200/70 dark:ring-gray-700/50 bg-white dark:bg-gray-900 flex flex-col max-h-[90vh]"
-                onClick={e => e.stopPropagation()}
             >
                 {/* Header */}
                 <div className="flex items-start justify-between px-6 pt-5 pb-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
@@ -1075,10 +1095,14 @@ function MasterfileHardwareManagement() {
                 ];
             } else if (cpuView === 'hostname_ip_mac') {
                 headers = [...commonHeaders, 'Hostname', 'IP Address', 'MAC Address'];
-                extractRow = row => [...commonExtract(row), row.hw_host_name || '', row.hw_ip_add || '', row.hw_mac_add || ''];
+                extractRow = row => [...commonExtract(row), cleanVal(row.hw_host_name), cleanVal(row.hw_ip_add), cleanVal(row.hw_mac_add)];
             } else if (cpuView === 'workstep_user') {
                 headers = [...commonHeaders, 'Primary Role', 'Assigned User'];
-                extractRow = row => [...commonExtract(row), row.hw_primary_role || '', row.hw_user_name || ''];
+                extractRow = row => [
+                    ...commonExtract(row),
+                    (row.hw_primary_role || '').split(',').map(s => s.trim()).filter(r => r && !isPlaceholderVal(r)).join(', '),
+                    cleanVal(row.hw_user_name),
+                ];
             } else {
                 headers = [...commonHeaders, 'Memory', 'HDD Health (%)', 'HDD Capacity', 'Free Space', 'Acq. Date', 'Age'];
                 extractRow = row => {
@@ -1092,7 +1116,7 @@ function MasterfileHardwareManagement() {
                 extractRow = row => [...commonExtract(row), row.os_type || '', row.hw_antivi || '', row.dotnet || ''];
             } else if (serverView === 'hostname_ip_mac') {
                 headers = [...commonHeaders, 'Hostname', 'IP Address', 'MAC Address'];
-                extractRow = row => [...commonExtract(row), row.hw_host_name || '', row.hw_ip_add || '', row.hw_mac_add || ''];
+                extractRow = row => [...commonExtract(row), cleanVal(row.hw_host_name), cleanVal(row.hw_ip_add), cleanVal(row.hw_mac_add)];
             } else {
                 headers = [...commonHeaders, 'Memory', 'HDD Health (%)', 'HDD Capacity', 'Free Space', 'Acq. Date', 'Age'];
                 extractRow = row => {
@@ -1111,7 +1135,7 @@ function MasterfileHardwareManagement() {
             headers = [...commonHeaders, 'Item Type', 'IP Address', 'OS Type', 'Memory', 'HDD Health (%)', 'Acq. Date', 'Age'];
             extractRow = row => {
                 const health = hddHealthBadge(row.hdd_capacity, row.hdd_free_space);
-                return [...commonExtract(row), row.item_desc || '', row.hw_ip_add || '', row.os_type || '', row.hw_memory || '', health.label, row.hw_date_acq || '', formatAge(computeAge(row.hw_date_acq))];
+                return [...commonExtract(row), row.item_desc || '', cleanVal(row.hw_ip_add), row.os_type || '', row.hw_memory || '', health.label, row.hw_date_acq || '', formatAge(computeAge(row.hw_date_acq))];
             };
         }
 
@@ -1386,13 +1410,13 @@ function MasterfileHardwareManagement() {
                     {serialCell}
                     {brandModel}
                     {siteCell}
-                    <td className={`${tdCls} font-mono text-xs`}>{row.hw_host_name || dash}</td>
-                    <td className={`${tdCls} font-mono text-xs`}>{row.hw_ip_add    || dash}</td>
-                    <td className={`${tdCls} font-mono text-xs`}>{row.hw_mac_add   || dash}</td>
+                    <td className={`${tdCls} font-mono text-xs`}>{cleanVal(row.hw_host_name) || dash}</td>
+                    <td className={`${tdCls} font-mono text-xs`}>{cleanVal(row.hw_ip_add)    || dash}</td>
+                    <td className={`${tdCls} font-mono text-xs`}>{cleanVal(row.hw_mac_add)   || dash}</td>
                 </tr>
             );
             if (cpuView === 'workstep_user') {
-                const roles = (row.hw_primary_role || '').split(',').map(s => s.trim()).filter(Boolean);
+                const roles = (row.hw_primary_role || '').split(',').map(s => s.trim()).filter(Boolean).filter(r => !isPlaceholderVal(r));
                 return (
                     <tr key={row.hw_id} onClick={() => setSelected(row)} className={rowCls}>
                         {assetCell}
@@ -1411,7 +1435,7 @@ function MasterfileHardwareManagement() {
                                 : <span className="text-gray-300 dark:text-gray-600 text-xs">—</span>
                             }
                         </td>
-                        <td className={`${tdCls} text-xs`}>{row.hw_user_name || dash}</td>
+                        <td className={`${tdCls} text-xs`}>{cleanVal(row.hw_user_name) || dash}</td>
                     </tr>
                 );
             }
@@ -1465,9 +1489,9 @@ function MasterfileHardwareManagement() {
                     {serialCell}
                     {brandModel}
                     {siteCell}
-                    <td className={`${tdCls} font-mono text-xs`}>{row.hw_host_name || dash}</td>
-                    <td className={`${tdCls} font-mono text-xs`}>{row.hw_ip_add    || dash}</td>
-                    <td className={`${tdCls} font-mono text-xs`}>{row.hw_mac_add   || dash}</td>
+                    <td className={`${tdCls} font-mono text-xs`}>{cleanVal(row.hw_host_name) || dash}</td>
+                    <td className={`${tdCls} font-mono text-xs`}>{cleanVal(row.hw_ip_add)    || dash}</td>
+                    <td className={`${tdCls} font-mono text-xs`}>{cleanVal(row.hw_mac_add)   || dash}</td>
                 </tr>
             );
             return (
@@ -1518,7 +1542,7 @@ function MasterfileHardwareManagement() {
                 <td className={`${tdCls} text-gray-500 dark:text-gray-400`}>{row.item_desc || '—'}</td>
                 {brandModel}
                 {siteCell}
-                <td className={`${tdCls} font-mono text-xs`}>{row.hw_ip_add  || dash}</td>
+                <td className={`${tdCls} font-mono text-xs`}>{cleanVal(row.hw_ip_add)  || dash}</td>
                 <td className={`${tdCls} text-xs`}>{row.os_type    || dash}</td>
                 <td className={`${tdCls} text-xs`}>{row.hw_memory  || dash}</td>
                 <td className={tdCls}>
