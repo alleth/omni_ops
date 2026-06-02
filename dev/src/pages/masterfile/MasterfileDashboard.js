@@ -107,6 +107,7 @@ function MasterfileDashboard() {
     const [requestLoading, setRequestLoading] = useState(false);
     const [selectedRequest, setSelectedRequest] = useState(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
+    const [showAllPullOuts, setShowAllPullOuts] = useState(false);
     const [selectedIds, setSelectedIds] = useState([]);
 
     const { fetchMany, fetchData } = useApi();
@@ -279,12 +280,11 @@ function MasterfileDashboard() {
 
         const noRequest = total - withRequest;
 
-        // PULL_OUT requests, sorted newest-first (the card scrolls, so we keep
-        // a generous cap rather than a tiny fixed slice)
-        const pullOutRequests = allRequests
+        // PULL_OUT requests, sorted newest-first. The card shows only the top
+        // few inline; the full list lives behind a "see all" modal.
+        const recent = allRequests
             .filter(r => r.request_type?.toUpperCase() === 'PULL_OUT')
             .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
-        const recent = pullOutRequests.slice(0, 50);
 
         return {
             pct: Math.round((withAttachment / total) * 100),
@@ -293,7 +293,7 @@ function MasterfileDashboard() {
             withRequest,
             noRequest,
             recent,
-            recentTotal: pullOutRequests.length,
+            recentTotal: recent.length,
         };
     }, [hardware, allRequests]);
 
@@ -369,6 +369,47 @@ function MasterfileDashboard() {
         if (day === 1) return 'yesterday';
         if (day < 7) return `${day}d ago`;
         return new Date(dateStr).toLocaleDateString([], { month: 'short', day: 'numeric' });
+    };
+
+    // Single pull-out request row — reused by the dashboard card and the
+    // "see all" modal. Opening the detail modal also closes the list modal.
+    const renderPullOutRow = (req, i) => {
+        const hasFile = req.attachment_path && String(req.attachment_path).trim();
+        const reqStatus = req.status?.toUpperCase() || 'PENDING';
+        const statusColors = {
+            APPROVED: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
+            REJECTED: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300',
+            PENDING: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
+            CANCELED: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400',
+        };
+        return (
+            <div key={req.request_id || i}
+                className="flex items-center gap-3 p-2.5 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/40 transition-colors cursor-pointer"
+                onClick={() => { setSelectedRequest(req); setIsModalOpen(true); setShowAllPullOuts(false); }}>
+                {/* File indicator */}
+                <div className={`flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center ${hasFile ? 'bg-emerald-100 dark:bg-emerald-900/40' : 'bg-gray-100 dark:bg-gray-700'}`}>
+                    <Icon
+                        d={hasFile
+                            ? "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                            : "M12 9v2m0 4h.01M5.07 19H19a2 2 0 001.75-2.75L13.75 4a2 2 0 00-3.5 0l-6.25 11.25A2 2 0 005.07 19z"}
+                        className={`w-4 h-4 ${hasFile ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-500'}`}
+                    />
+                </div>
+                {/* Info */}
+                <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium text-gray-800 dark:text-gray-200 truncate">
+                        {[req.item_desc, req.hw_brand_name, req.hw_model].filter(Boolean).join(' ') || 'Unknown hardware'}
+                    </p>
+                    <p className="text-xs text-gray-400 dark:text-gray-500 truncate">
+                        {req.site_code || '—'} · {formatRelTime(req.created_at)}
+                    </p>
+                </div>
+                {/* Status badge */}
+                <span className={`flex-shrink-0 text-xs font-medium px-2 py-0.5 rounded-full ${statusColors[reqStatus] || statusColors.PENDING}`}>
+                    {reqStatus.charAt(0) + reqStatus.slice(1).toLowerCase()}
+                </span>
+            </div>
+        );
     };
 
     const statusBadge = (req) => {
@@ -624,45 +665,16 @@ function MasterfileDashboard() {
                                     <p className="text-xs text-gray-400 dark:text-gray-500">No pull-out requests yet</p>
                                 </div>
                             ) : (
-                                <div className="space-y-2.5 max-h-[320px] overflow-y-auto -mr-2 pr-2">
-                                    {pullOutMetrics.recent.map((req, i) => {
-                                        const hasFile = req.attachment_path && String(req.attachment_path).trim();
-                                        const reqStatus = req.status?.toUpperCase() || 'PENDING';
-                                        const statusColors = {
-                                            APPROVED: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
-                                            REJECTED: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300',
-                                            PENDING: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
-                                            CANCELED: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400',
-                                        };
-                                        return (
-                                            <div key={req.request_id || i}
-                                                className="flex items-center gap-3 p-2.5 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/40 transition-colors cursor-pointer"
-                                                onClick={() => { setSelectedRequest(req); setIsModalOpen(true); }}>
-                                                {/* File indicator */}
-                                                <div className={`flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center ${hasFile ? 'bg-emerald-100 dark:bg-emerald-900/40' : 'bg-gray-100 dark:bg-gray-700'}`}>
-                                                    <Icon
-                                                        d={hasFile
-                                                            ? "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                                                            : "M12 9v2m0 4h.01M5.07 19H19a2 2 0 001.75-2.75L13.75 4a2 2 0 00-3.5 0l-6.25 11.25A2 2 0 005.07 19z"}
-                                                        className={`w-4 h-4 ${hasFile ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-500'}`}
-                                                    />
-                                                </div>
-                                                {/* Info */}
-                                                <div className="flex-1 min-w-0">
-                                                    <p className="text-xs font-medium text-gray-800 dark:text-gray-200 truncate">
-                                                        {[req.item_desc, req.hw_brand_name, req.hw_model].filter(Boolean).join(' ') || 'Unknown hardware'}
-                                                    </p>
-                                                    <p className="text-xs text-gray-400 dark:text-gray-500 truncate">
-                                                        {req.site_code || '—'} · {formatRelTime(req.created_at)}
-                                                    </p>
-                                                </div>
-                                                {/* Status badge */}
-                                                <span className={`flex-shrink-0 text-xs font-medium px-2 py-0.5 rounded-full ${statusColors[reqStatus] || statusColors.PENDING}`}>
-                                                    {reqStatus.charAt(0) + reqStatus.slice(1).toLowerCase()}
-                                                </span>
-                                            </div>
-                                        );
-                                    })}
+                                <div className="space-y-2.5">
+                                    {pullOutMetrics.recent.slice(0, 4).map(renderPullOutRow)}
+                                    {pullOutMetrics.recentTotal > 4 && (
+                                        <button
+                                            onClick={() => setShowAllPullOuts(true)}
+                                            className="w-full mt-1 flex items-center justify-center gap-1.5 text-xs font-medium text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 py-2 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors">
+                                            See all {pullOutMetrics.recentTotal} requests
+                                            <Icon d="M9 5l7 7-7 7" className="w-3.5 h-3.5" />
+                                        </button>
+                                    )}
                                 </div>
                             )}
                         </div>
@@ -837,6 +849,29 @@ function MasterfileDashboard() {
                     FSE Masterfile — Hardware Inventory &amp; Site Monitoring
                 </p>
             </div>
+
+            {/* See-all Pull-Out Requests modal */}
+            {showAllPullOuts && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+                    onClick={() => setShowAllPullOuts(false)}>
+                    <div className="relative w-full max-w-lg max-h-[85vh] flex flex-col rounded-2xl bg-white dark:bg-gray-800 shadow-2xl border border-gray-200 dark:border-gray-700"
+                        onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-700">
+                            <div>
+                                <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100">Recent Pull-Out Requests</h3>
+                                <p className="text-xs text-gray-400 dark:text-gray-500">{pullOutMetrics.recentTotal} total</p>
+                            </div>
+                            <button onClick={() => setShowAllPullOuts(false)}
+                                className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                                <Icon d="M6 18L18 6M6 6l12 12" className="w-5 h-5" />
+                            </button>
+                        </div>
+                        <div className="overflow-y-auto px-3 py-3 space-y-2.5">
+                            {pullOutMetrics.recent.map(renderPullOutRow)}
+                        </div>
+                    </div>
+                </div>
+            )}
 
             <RequestDetailModal
                 request={selectedRequest}
