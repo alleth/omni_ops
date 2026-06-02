@@ -1,7 +1,8 @@
 // src/pages/masterfile/MasterfileInventory.js
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { XMarkIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
+import { XMarkIcon, ChevronRightIcon, ArrowDownTrayIcon } from '@heroicons/react/24/outline';
+import * as XLSX from 'xlsx';
 import { useApi } from '../../hooks/useApi';
 import AddHardwareModal from './components/AddHardwareModal';
 import BulkRequestModal from './components/BulkRequestModal';
@@ -542,6 +543,7 @@ function MasterfileInventory() {
     const [viewDetailItem, setViewDetailItem] = useState(null);
     const [pulloutRequests, setPulloutRequests] = useState([]);
     const [accuracyModal, setAccuracyModal] = useState(null); // null | 'profile' | 'duplicates' | 'attachment'
+    const [showReportModal, setShowReportModal] = useState(false);
 
     const showToast = (message, type = 'error') => {
         setToast({ message, type });
@@ -1168,6 +1170,86 @@ function MasterfileInventory() {
         setIsModalOpen(true);
     };
 
+    // ── Excel report (respects role scope + active filters) ──────────────────
+    // Columns shown in both the preview modal and the exported sheet.
+    const reportHeaders = (() => {
+        const base = ['Region', 'Site Code', 'Site Name', 'Asset #', 'Serial #', 'Item Type', 'Brand', 'Model', 'OS Type', 'Memory', 'Status', 'Acq. Date'];
+        if (statusFilter === 'Pull Out') base.push('Pull-Out Request', 'Attachment On File');
+        return base;
+    })();
+
+    const extractReportRow = (item) => {
+        const site = siteMap[item.site_code];
+        const regionName = site ? (regionMap[String(site.region_id)] || '') : '';
+        const row = [
+            regionName,
+            item.site_code || '',
+            site?.site_name || '',
+            item.hw_asset_num || '',
+            item.hw_serial_num || '',
+            item.item_desc || '',
+            item.hw_brand_name || '',
+            item.hw_model || '',
+            item.os_type || '',
+            item.hw_memory || '',
+            item.hw_status || '',
+            item.hw_date_acq || '',
+        ];
+        if (statusFilter === 'Pull Out') {
+            const req = pulloutRequestMap.get(String(item.hw_id));
+            row.push(
+                req?.status || 'No request',
+                (req?.attachment_path && String(req.attachment_path).trim()) ? 'Yes' : 'No',
+            );
+        }
+        return row;
+    };
+
+    // Human-readable scope labels driven by the active dropdowns + role.
+    const reportRegionLabel = selectedRegion
+        ? (regionMap[selectedRegion] || selectedRegion)
+        : (role === 'ADM' && user.cluster_name === 'All Cluster')
+            ? 'All Regions'
+            : (['SPV', 'SUPERVISOR'].includes(role) && user.cluster_name)
+                ? `All Regions in ${user.cluster_name}`
+                : 'All Assigned Regions';
+    const reportSiteLabel = selectedSite
+        ? `${selectedSite}${siteMap[selectedSite]?.site_name ? ` – ${siteMap[selectedSite].site_name}` : ''}`
+        : 'All Sites';
+    const reportTypeLabel = selectedType || 'All Types';
+    const reportFilename = (() => {
+        const regionPart = (selectedRegion ? (regionMap[selectedRegion] || selectedRegion) : 'AllRegions').replace(/[^a-zA-Z0-9]/g, '_');
+        const sitePart = selectedSite ? `_${selectedSite}` : '';
+        const statusPart = statusFilter.replace(/[^a-zA-Z0-9]/g, '');
+        const dateStr = new Date().toISOString().slice(0, 10);
+        return `Inventory_${statusPart}_${regionPart}${sitePart}_${dateStr}.xlsx`;
+    })();
+
+    const ScopeRow = ({ label, value }) => (
+        <div className="flex flex-col min-w-0">
+            <span className="text-xs text-gray-400 dark:text-gray-500">{label}</span>
+            <span className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate" title={value}>{value}</span>
+        </div>
+    );
+
+    const generateInventoryReport = () => {
+        if (!sortedHardware.length) return;
+        const rows = sortedHardware.map(extractReportRow);
+        const wsData = [reportHeaders, ...rows];
+
+        const colWidths = reportHeaders.map((h, ci) => {
+            const max = rows.reduce((m, r) => Math.max(m, String(r[ci] ?? '').length), h.length);
+            return { wch: Math.min(Math.max(max + 2, 12), 45) };
+        });
+
+        const wb = XLSX.utils.book_new();
+        const ws = XLSX.utils.aoa_to_sheet(wsData);
+        ws['!cols'] = colWidths;
+        XLSX.utils.book_append_sheet(wb, ws, statusFilter.slice(0, 31));
+        XLSX.writeFile(wb, reportFilename);
+        setShowReportModal(false);
+    };
+
     return (
         <div className="p-6 max-w-7xl mx-auto space-y-8">
             <div>
@@ -1548,6 +1630,16 @@ function MasterfileInventory() {
                                 </>
                             )}
 
+                            {sortedHardware.length > 0 && (
+                                <button
+                                    onClick={() => setShowReportModal(true)}
+                                    className="flex items-center gap-2 px-4 py-1.5 text-sm font-medium text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800/50 rounded-md hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-colors"
+                                >
+                                    <ArrowDownTrayIcon className="w-4 h-4" />
+                                    Generate Report
+                                </button>
+                            )}
+
                             <div className="flex items-center gap-2">
                                 <span className="text-xs text-gray-600 dark:text-gray-400">Rows</span>
                                 <select
@@ -1743,6 +1835,103 @@ function MasterfileInventory() {
                     setViewDetailItem(null);
                 }}
             />
+
+            {/* Report preview / confirmation modal */}
+            {showReportModal && createPortal(
+                <div
+                    className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+                    onClick={() => setShowReportModal(false)}
+                >
+                    <div
+                        className="relative w-full max-w-lg rounded-2xl shadow-2xl ring-1 ring-gray-200/70 dark:ring-gray-700/50 bg-white dark:bg-gray-900 flex flex-col max-h-[90vh]"
+                        onClick={e => e.stopPropagation()}
+                    >
+                        {/* Header */}
+                        <div className="flex items-start justify-between px-6 pt-5 pb-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+                            <div>
+                                <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                                    <ArrowDownTrayIcon className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                                    Generate Report
+                                </h2>
+                                <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                                    Here's what this Excel export will contain
+                                </p>
+                            </div>
+                            <button
+                                onClick={() => setShowReportModal(false)}
+                                className="p-1.5 rounded-full text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                            >
+                                <XMarkIcon className="w-5 h-5" />
+                            </button>
+                        </div>
+
+                        {/* Body */}
+                        <div className="overflow-y-auto flex-1 px-6 py-4 space-y-4">
+                            {/* Scope summary — driven by the active dropdowns + user role */}
+                            <div>
+                                <p className="text-xs font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2">Report scope</p>
+                                <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                                    <ScopeRow label="Status" value={statusFilter} />
+                                    <ScopeRow label="Region" value={reportRegionLabel} />
+                                    <ScopeRow label="Site" value={reportSiteLabel} />
+                                    <ScopeRow label="Type" value={reportTypeLabel} />
+                                    {searchTerm && <ScopeRow label="Search filter" value={`"${searchTerm}"`} />}
+                                </div>
+                            </div>
+
+                            {/* Record count */}
+                            <div className="flex items-center gap-3 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800/50 px-4 py-3">
+                                <span className="text-2xl font-bold text-emerald-700 dark:text-emerald-400 leading-none">
+                                    {sortedHardware.length.toLocaleString()}
+                                </span>
+                                <span className="text-xs text-emerald-700/80 dark:text-emerald-300/80">
+                                    hardware {sortedHardware.length === 1 ? 'unit' : 'units'} matching these filters<br />will be exported to Excel
+                                </span>
+                            </div>
+
+                            {/* Columns */}
+                            <div>
+                                <p className="text-xs font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2">
+                                    Columns included ({reportHeaders.length})
+                                </p>
+                                <div className="flex flex-wrap gap-1.5">
+                                    {reportHeaders.map(h => (
+                                        <span key={h} className="px-2 py-0.5 text-xs rounded-md bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-700">
+                                            {h}
+                                        </span>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Filename */}
+                            <div>
+                                <p className="text-xs font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-1">File name</p>
+                                <p className="text-xs font-mono text-gray-600 dark:text-gray-300 break-all bg-gray-50 dark:bg-gray-800/60 rounded-md px-3 py-2 border border-gray-200 dark:border-gray-700">
+                                    {reportFilename}
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Footer */}
+                        <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex-shrink-0">
+                            <button
+                                onClick={() => setShowReportModal(false)}
+                                className="px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={generateInventoryReport}
+                                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors"
+                            >
+                                <ArrowDownTrayIcon className="w-4 h-4" />
+                                Download Excel
+                            </button>
+                        </div>
+                    </div>
+                </div>,
+                document.getElementById('modal-root') || document.body
+            )}
         </div>
     );
 }
