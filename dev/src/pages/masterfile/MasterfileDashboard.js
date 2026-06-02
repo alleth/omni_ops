@@ -279,11 +279,12 @@ function MasterfileDashboard() {
 
         const noRequest = total - withRequest;
 
-        // Recent PULL_OUT requests (last 6, sorted newest-first)
-        const recent = allRequests
+        // PULL_OUT requests, sorted newest-first (the card scrolls, so we keep
+        // a generous cap rather than a tiny fixed slice)
+        const pullOutRequests = allRequests
             .filter(r => r.request_type?.toUpperCase() === 'PULL_OUT')
-            .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
-            .slice(0, 6);
+            .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+        const recent = pullOutRequests.slice(0, 50);
 
         return {
             pct: Math.round((withAttachment / total) * 100),
@@ -292,6 +293,7 @@ function MasterfileDashboard() {
             withRequest,
             noRequest,
             recent,
+            recentTotal: pullOutRequests.length,
         };
     }, [hardware, allRequests]);
 
@@ -590,9 +592,16 @@ function MasterfileDashboard() {
 
                         {/* Recent pull-out requests */}
                         <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5 shadow-sm">
-                            <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-3">
-                                Recent Pull-Out Requests
-                            </p>
+                            <div className="flex items-center justify-between mb-3">
+                                <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-widest">
+                                    Recent Pull-Out Requests
+                                </p>
+                                {!dataLoading && pullOutMetrics.recentTotal > 0 && (
+                                    <span className="flex-shrink-0 text-xs font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">
+                                        {pullOutMetrics.recentTotal}
+                                    </span>
+                                )}
+                            </div>
                             {dataLoading ? (
                                 <div className="space-y-3">
                                     {[...Array(4)].map((_, i) => (
@@ -615,7 +624,7 @@ function MasterfileDashboard() {
                                     <p className="text-xs text-gray-400 dark:text-gray-500">No pull-out requests yet</p>
                                 </div>
                             ) : (
-                                <div className="space-y-2.5">
+                                <div className="space-y-2.5 max-h-[320px] overflow-y-auto -mr-2 pr-2">
                                     {pullOutMetrics.recent.map((req, i) => {
                                         const hasFile = req.attachment_path && String(req.attachment_path).trim();
                                         const reqStatus = req.status?.toUpperCase() || 'PENDING';
