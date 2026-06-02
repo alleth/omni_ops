@@ -896,6 +896,7 @@ function MasterfileHardwareManagement() {
     const [pageSize,         setPageSize]         = useState(30);
     const [selected,         setSelected]         = useState(null);
     const [allRegions,       setAllRegions]       = useState([]);
+    const [showReportModal,  setShowReportModal]  = useState(false);
 
     // ── Role detection ─────────────────────────────────────────────────────
     const user = useMemo(() => { try { return JSON.parse(sessionStorage.getItem('user') || '{}'); } catch { return {}; } }, []);
@@ -1061,9 +1062,9 @@ function MasterfileHardwareManagement() {
         setSelected(s => s ? { ...s, ...updatedRow } : s);
     };
 
-    const generateExcelReport = () => {
-        if (!filtered.length) return;
-
+    // Column set + row extractor for the active filters. Shared by the report
+    // preview modal and the Excel export so the two never drift apart.
+    const reportConfig = useMemo(() => {
         const commonHeaders = ['Region', 'Site Code', 'Site Name', 'Asset #', 'Serial #', 'Brand', 'Model'];
         const commonExtract = row => {
             const site = siteMap[row.site_code];
@@ -1139,6 +1140,26 @@ function MasterfileHardwareManagement() {
             };
         }
 
+        const categoryLabel = filterHwCategory || 'All';
+        const subLabel = filterHwCategory === 'CPU'
+            ? CPU_VIEWS.find(v => v.value === cpuView)?.label
+            : filterHwCategory === 'SERVER'
+                ? SERVER_VIEWS.find(v => v.value === serverView)?.label
+                : null;
+
+        const regionLabel = filterRegion ? (regionMap[filterRegion] || filterRegion).replace(/[^a-zA-Z0-9]/g, '_') : 'AllRegions';
+        const siteLabel   = filterSite ? `_${filterSite}` : '';
+        const dateStr     = new Date().toISOString().slice(0, 10);
+        const filename    = `Hardware_${categoryLabel}${subLabel ? '_' + subLabel.replace(/[^a-zA-Z0-9]/g, '_') : ''}_${regionLabel}${siteLabel}_${dateStr}.xlsx`;
+
+        return { headers, extractRow, categoryLabel, subLabel, filename };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [filterHwCategory, cpuView, serverView, filterRegion, filterSite, siteMap, regionMap]);
+
+    const generateExcelReport = () => {
+        if (!filtered.length) return;
+        const { headers, extractRow, categoryLabel, subLabel, filename } = reportConfig;
+
         const rows = filtered.map(extractRow);
         const wsData = [headers, ...rows];
 
@@ -1152,21 +1173,11 @@ function MasterfileHardwareManagement() {
         const ws = XLSX.utils.aoa_to_sheet(wsData);
         ws['!cols'] = colWidths;
 
-        const categoryLabel = filterHwCategory || 'All';
-        const subLabel = filterHwCategory === 'CPU'
-            ? CPU_VIEWS.find(v => v.value === cpuView)?.label
-            : filterHwCategory === 'SERVER'
-                ? SERVER_VIEWS.find(v => v.value === serverView)?.label
-                : null;
         const sheetName = subLabel ? subLabel.slice(0, 31) : categoryLabel;
         XLSX.utils.book_append_sheet(wb, ws, sheetName);
 
-        const regionLabel = filterRegion ? (regionMap[filterRegion] || filterRegion).replace(/[^a-zA-Z0-9]/g, '_') : 'AllRegions';
-        const siteLabel   = filterSite ? `_${filterSite}` : '';
-        const dateStr     = new Date().toISOString().slice(0, 10);
-        const filename    = `Hardware_${categoryLabel}${subLabel ? '_' + subLabel.replace(/[^a-zA-Z0-9]/g, '_') : ''}_${regionLabel}${siteLabel}_${dateStr}.xlsx`;
-
         XLSX.writeFile(wb, filename);
+        setShowReportModal(false);
     };
 
     if (loadError) {
@@ -1559,6 +1570,20 @@ function MasterfileHardwareManagement() {
         ? CPU_VIEWS.find(v => v.value === cpuView)?.label
         : null;
 
+    // Human-readable labels for the report preview modal
+    const TYPE_LABELS = { CPU: 'CPU / PC', SERVER: 'Server', SWITCH: 'Switch' };
+    const reportTypeLabel   = TYPE_LABELS[filterHwCategory] || filterHwCategory || 'All';
+    const reportRegionLabel = filterRegion ? (regionMap[filterRegion] || filterRegion) : 'All Regions';
+    const reportSiteLabel   = filterSite
+        ? `${filterSite}${siteMap[filterSite]?.site_name ? ` – ${siteMap[filterSite].site_name}` : ''}`
+        : 'All Sites';
+    const ScopeRow = ({ label, value }) => (
+        <div className="flex flex-col min-w-0">
+            <span className="text-xs text-gray-400 dark:text-gray-500">{label}</span>
+            <span className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate" title={value}>{value}</span>
+        </div>
+    );
+
     const startEntry = filtered.length > 0 ? currentPage * pageSize + 1 : 0;
     const endEntry   = Math.min((currentPage + 1) * pageSize, filtered.length);
 
@@ -1588,7 +1613,7 @@ function MasterfileHardwareManagement() {
                 </div>
                 {!loading && filtered.length > 0 && (
                     <button
-                        onClick={generateExcelReport}
+                        onClick={() => setShowReportModal(true)}
                         className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800/50 rounded-lg hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-colors"
                     >
                         <ArrowDownTrayIcon className="w-4 h-4" />
@@ -1809,6 +1834,105 @@ function MasterfileHardwareManagement() {
                     onClose={() => setSelected(null)}
                     onSaved={handleSaved}
                 />
+            )}
+
+            {/* Report preview / confirmation modal */}
+            {showReportModal && createPortal(
+                <div
+                    className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+                    onClick={() => setShowReportModal(false)}
+                >
+                    <div
+                        className="relative w-full max-w-lg rounded-2xl shadow-2xl ring-1 ring-gray-200/70 dark:ring-gray-700/50 bg-white dark:bg-gray-900 flex flex-col max-h-[90vh]"
+                        onClick={e => e.stopPropagation()}
+                    >
+                        {/* Header */}
+                        <div className="flex items-start justify-between px-6 pt-5 pb-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+                            <div>
+                                <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                                    <ArrowDownTrayIcon className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                                    Generate Report
+                                </h2>
+                                <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                                    Here's what this Excel export will contain
+                                </p>
+                            </div>
+                            <button
+                                onClick={() => setShowReportModal(false)}
+                                className="p-1.5 rounded-full text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                            >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+
+                        {/* Body */}
+                        <div className="overflow-y-auto flex-1 px-6 py-4 space-y-4">
+                            {/* Scope summary — driven by the active dropdowns */}
+                            <div>
+                                <p className="text-xs font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2">Report scope</p>
+                                <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                                    <ScopeRow label="Hardware Type" value={reportTypeLabel} />
+                                    {reportConfig.subLabel && <ScopeRow label="View" value={reportConfig.subLabel} />}
+                                    <ScopeRow label="Region" value={reportRegionLabel} />
+                                    <ScopeRow label="Site" value={reportSiteLabel} />
+                                    {search && <ScopeRow label="Search filter" value={`"${search}"`} />}
+                                </div>
+                            </div>
+
+                            {/* Record count */}
+                            <div className="flex items-center gap-3 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800/50 px-4 py-3">
+                                <span className="text-2xl font-bold text-emerald-700 dark:text-emerald-400 leading-none">
+                                    {filtered.length.toLocaleString()}
+                                </span>
+                                <span className="text-xs text-emerald-700/80 dark:text-emerald-300/80">
+                                    hardware {filtered.length === 1 ? 'unit' : 'units'} matching these filters<br />will be exported to Excel
+                                </span>
+                            </div>
+
+                            {/* Columns */}
+                            <div>
+                                <p className="text-xs font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2">
+                                    Columns included ({reportConfig.headers.length})
+                                </p>
+                                <div className="flex flex-wrap gap-1.5">
+                                    {reportConfig.headers.map(h => (
+                                        <span key={h} className="px-2 py-0.5 text-xs rounded-md bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-700">
+                                            {h}
+                                        </span>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Filename */}
+                            <div>
+                                <p className="text-xs font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-1">File name</p>
+                                <p className="text-xs font-mono text-gray-600 dark:text-gray-300 break-all bg-gray-50 dark:bg-gray-800/60 rounded-md px-3 py-2 border border-gray-200 dark:border-gray-700">
+                                    {reportConfig.filename}
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Footer */}
+                        <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex-shrink-0">
+                            <button
+                                onClick={() => setShowReportModal(false)}
+                                className="px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={generateExcelReport}
+                                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors"
+                            >
+                                <ArrowDownTrayIcon className="w-4 h-4" />
+                                Download Excel
+                            </button>
+                        </div>
+                    </div>
+                </div>,
+                getModalRoot()
             )}
         </div>
     );
