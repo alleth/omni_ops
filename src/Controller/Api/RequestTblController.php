@@ -189,6 +189,18 @@ class RequestTblController extends AppController
                 'quantity'          => $itemData['quantity'] ?? 1,
                 'remarks'           => $itemData['remarks'] ?? $data['remarks'] ?? null,
                 'attachment_path'   => $attachmentPath,
+                // Pull-out detail fields
+                'sr_num'            => $data['sr_num'] ?? null,
+                'sr_date'           => $data['sr_date'] ?? null,
+                'return_date'       => $data['return_date'] ?? null,
+                'delivery_method'   => $data['delivery_method'] ?? null,
+                'tracking_num'      => $data['tracking_num'] ?? null,
+                'delivered_by'      => $data['delivered_by'] ?? null,
+                'pickup_date'       => $data['pickup_date'] ?? null,
+                // Relocation detail fields
+                'date_transfer'     => $data['date_transfer'] ?? null,
+                'transfer_from_name' => $data['transfer_from_name'] ?? null,
+                'transfer_to_name'  => $data['transfer_to_name'] ?? null,
             ];
 
             $requestTbl = $this->RequestTbl->newEntity($entityData);
