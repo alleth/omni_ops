@@ -169,7 +169,9 @@ const getFileUrl = (path) => {
     if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
         return `http://omniops.local${path}`;
     }
-    return path;
+    // Production: files are served by the VM, addressed by its IP so the link
+    // resolves even on clients without the omniops.local hosts entry.
+    return `http://192.168.4.95:8888${path}`;
 };
 
 const HardwareDetailModal = ({ item, request, siteMap, regionMap, onClose, onAttachSuccess }) => {
