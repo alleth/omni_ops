@@ -64,6 +64,32 @@ const AddHardwareModal = ({
     const lastFetchedDesc = useRef(null);
     const lastFetchedBrand = useRef(null);
 
+    // react-select applies an inline `color` to singleValue/input that overrides
+    // Tailwind `dark:` classes, leaving selected text dark in dark mode. Track the
+    // dark class on <html> and set the color via the styles prop so it wins.
+    const [isDark, setIsDark] = useState(
+        () => typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
+    );
+    useEffect(() => {
+        const root = document.documentElement;
+        const observer = new MutationObserver(() => setIsDark(root.classList.contains('dark')));
+        observer.observe(root, { attributes: true, attributeFilter: ['class'] });
+        return () => observer.disconnect();
+    }, []);
+
+    const selectStyles = useMemo(() => ({
+        control: (base) => ({
+            ...base,
+            borderColor: 'inherit',
+            boxShadow: 'none',
+            '&:hover': { borderColor: 'inherit' },
+        }),
+        menuPortal: (base) => ({ ...base, zIndex: 9999 }),
+        singleValue: (base) => ({ ...base, color: isDark ? '#f3f4f6' : '#111827' }),
+        input: (base) => ({ ...base, color: isDark ? '#f3f4f6' : '#111827' }),
+        placeholder: (base) => ({ ...base, color: isDark ? '#9ca3af' : '#6b7280' }),
+    }), [isDark]);
+
     // Reset / pre-fill form when modal opens
     useEffect(() => {
         if (isOpen) {
@@ -539,15 +565,7 @@ const AddHardwareModal = ({
                                     clearIndicator: () => 'text-gray-500 hover:text-gray-700 px-1',
                                     indicatorSeparator: () => 'bg-gray-300 dark:bg-gray-600 mx-1 my-1',
                                 }}
-                                styles={{
-                                    control: (base) => ({
-                                        ...base,
-                                        borderColor: 'inherit',
-                                        boxShadow: 'none',
-                                        '&:hover': { borderColor: 'inherit' },
-                                    }),
-                                    menuPortal: (base) => ({ ...base, zIndex: 9999 }),
-                                }}
+                                styles={selectStyles}
                                 menuPortalTarget={document.body}
                             />
                         )}
@@ -592,15 +610,7 @@ const AddHardwareModal = ({
                                     clearIndicator: () => 'text-gray-500 hover:text-gray-700 px-1',
                                     indicatorSeparator: () => 'bg-gray-300 dark:bg-gray-600 mx-1 my-1',
                                 }}
-                                styles={{
-                                    control: (base) => ({
-                                        ...base,
-                                        borderColor: 'inherit',
-                                        boxShadow: 'none',
-                                        '&:hover': { borderColor: 'inherit' },
-                                    }),
-                                    menuPortal: (base) => ({ ...base, zIndex: 9999 }),
-                                }}
+                                styles={selectStyles}
                                 menuPortalTarget={document.body}
                             />
                         </div>
@@ -648,15 +658,7 @@ const AddHardwareModal = ({
                                 clearIndicator: () => 'text-gray-500 hover:text-gray-700 px-1',
                                 indicatorSeparator: () => 'bg-gray-300 dark:bg-gray-600 mx-1 my-1',
                             }}
-                            styles={{
-                                control: (base) => ({
-                                    ...base,
-                                    borderColor: 'inherit',
-                                    boxShadow: 'none',
-                                    '&:hover': { borderColor: 'inherit' },
-                                }),
-                                menuPortal: (base) => ({ ...base, zIndex: 9999 }),
-                            }}
+                            styles={selectStyles}
                             menuPortalTarget={document.body}
                         />
                     </div>
@@ -701,15 +703,7 @@ const AddHardwareModal = ({
                                 clearIndicator: () => 'text-gray-500 hover:text-gray-700 px-1',
                                 indicatorSeparator: () => 'bg-gray-300 dark:bg-gray-600 mx-1 my-1',
                             }}
-                            styles={{
-                                control: (base) => ({
-                                    ...base,
-                                    borderColor: 'inherit',
-                                    boxShadow: 'none',
-                                    '&:hover': { borderColor: 'inherit' },
-                                }),
-                                menuPortal: (base) => ({ ...base, zIndex: 9999 }),
-                            }}
+                            styles={selectStyles}
                             menuPortalTarget={document.body}
                         />
                     </div>
@@ -740,6 +734,7 @@ const AddHardwareModal = ({
                                             isSelected ? 'bg-indigo-600 text-white' : isFocused ? 'bg-indigo-50 dark:bg-indigo-800/30' : 'hover:bg-indigo-50 dark:hover:bg-indigo-800/20'
                                         }`,
                                 }}
+                                styles={selectStyles}
                             />
                         </div>
 
@@ -801,6 +796,7 @@ const AddHardwareModal = ({
                                             isSelected ? 'bg-indigo-600 text-white' : isFocused ? 'bg-indigo-50 dark:bg-indigo-800/30' : 'hover:bg-indigo-50 dark:hover:bg-indigo-800/20'
                                         }`,
                                 }}
+                                styles={selectStyles}
                             />
                         </div>
 

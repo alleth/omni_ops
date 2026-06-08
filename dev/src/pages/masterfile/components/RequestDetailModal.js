@@ -156,7 +156,10 @@ export default function RequestDetailModal({
     const attachmentPath = currentRequest.attachment_path;
     const hasAttachment = attachmentPath && typeof attachmentPath === 'string' && attachmentPath.trim() !== '';
     const currentOrigin = window.location.origin;
-    let baseUrl = currentOrigin.includes('localhost') && currentOrigin.includes(':3000') ? 'http://omniops.local' : 'http://omniops.local:8888';
+    // Dev (CRA on localhost) points at the omniops.local backend; in production the
+    // attachment is served from the same origin, so use a relative path.
+    const isDevHost = currentOrigin.includes('localhost') || currentOrigin.includes('127.0.0.1');
+    const baseUrl = isDevHost ? 'http://omniops.local' : '';
     const originalAttachmentUrl = hasAttachment ? `${baseUrl}${attachmentPath.trim()}` : null;
 
     let fileExtension = '';
