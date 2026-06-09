@@ -1,0 +1,12 @@
+# SPA cache policy.
+# The hashed JS/CSS filenames (main.<hash>.js) are content-addressed, so they
+# can be cached forever. index.html references those hashes, so it must NOT be
+# cached — otherwise browsers keep loading an old index.html that points at a
+# stale bundle after a deploy. Always revalidate index.html.
+<IfModule mod_headers.c>
+    <FilesMatch "index\.html$">
+        Header set Cache-Control "no-cache, no-store, must-revalidate"
+        Header set Pragma "no-cache"
+        Header set Expires "0"
+    </FilesMatch>
+</IfModule>
