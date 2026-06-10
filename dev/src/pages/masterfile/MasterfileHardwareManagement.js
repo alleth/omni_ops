@@ -233,7 +233,7 @@ const CORE_BUILD_OPTIONS = ['OR/CR', 'DL DEMERIT'];
 // Boolean DB columns — send '0'/'1', never omit them
 const BOOL_SAVE_FIELDS  = new Set(['rsu_fac', 'mv_dto', 'mv_maint', 'ims_aiu', 'dl_dto', 'dl_maint']);
 const DOTNET_OPTIONS    = ['v2.0', 'v3.5', 'v4.0', 'v4.5', 'v4.6', 'v4.6.1', 'v4.7', 'v4.7.1', 'v4.7.2', 'v4.8', 'v4.8.1', 'Not Installed'];
-const OS_TYPE_OPTIONS        = ['Windows XP', 'Windows 7', 'Windows 10 32-Bit', 'Windows 10 64-Bit', 'Windows 11'];
+const OS_TYPE_OPTIONS        = ['Windows XP', 'Windows 7', 'Windows 10 32-Bit', 'Windows 10 64-Bit', 'Windows 11 64-Bit'];
 const OS_SERVER_TYPE_OPTIONS = ['Windows Server 2003', 'Windows Server 2008', 'Windows Server 2008 R2', 'Windows Server 2012', 'Windows Server 2012 R2', 'Windows Server 2016', 'Windows Server 2019', 'Windows Server 2022', 'Windows Server 2025'];
 const WORKSTEP_OPTIONS  = ['Evaluator', 'Data Encoder', 'PhotoSig', 'InputClerk', 'Approving Officer', 'Hearing Officer', 'Cashier', 'Releasing', 'D.I.Y.', 'DL Examiner', 'SSP'];
 const MEMORY_OPTIONS     = ['2GB', '4GB', '6GB', '8GB', '12GB', '16GB', '24GB', '32GB', '48GB', '64GB', '128GB', '256GB'];

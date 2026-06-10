@@ -174,7 +174,7 @@ const AddHardwareModal = ({
         { value: 'Windows XP', label: 'Windows XP' },
         { value: 'Windows 10 32-Bit', label: 'Win 10 32-Bit' },
         { value: 'Windows 10 64-Bit', label: 'Win 10 64-Bit' },
-        { value: 'Windows 11', label: 'Windows 11' },
+        { value: 'Windows 11 64-Bit', label: 'Windows 11' },
     ];
 
     const showOsType = formData.item_desc === 'CPU-PC';

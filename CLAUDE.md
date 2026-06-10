@@ -155,6 +155,9 @@ Protected routes:
 4. State is local per component; dark mode preference stored in `localStorage.darkMode`
 5. A 15-minute inactivity timer (`dev/src/utils/session.js`) shows a timeout modal and redirects to login
 6. `useApi` always uses relative URL paths (empty string prefix); the CRA proxy in `package.json` forwards `/api/*` requests to `http://omniops.local` during development
+7. **A few components bypass `useApi` with host-detected absolute URLs** — do not assume all network calls go through the hook or the CRA proxy:
+   - `MasterfileLogin.js` and `MasterfileProfile.js` build their own `API_BASE` / hardcode `http://omniops.local` for login and profile-update `fetch` calls.
+   - Attachment/file links (`getFileUrl` in `MasterfileInventory.js`, `RequestDetailModal.js`) switch on `window.location.origin`: dev/localhost → `http://omniops.local`, otherwise the production VM at the hardcoded IP `http://192.168.4.95:8888`. This IP is used (rather than `omniops.local`) so links resolve on clients without the hosts-file entry. Update these hardcoded hosts when the deployment target changes.
 
 ### Role-Based Access
 

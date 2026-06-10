@@ -36,59 +36,52 @@ ChartJS.register(ArcElement, Tooltip, Legend, {
     }
 });
 
-// ───── MINIMALIST SKELETON COMPONENTS ─────
-const SkeletonNavbar = () => (
-    <div className="fixed top-0 left-0 right-0 z-50 h-16 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800">
-        <div className="h-full px-6 flex items-center justify-between">
-            <div className="flex items-center gap-4">
-                <div className="w-8 h-8 bg-gray-200 dark:bg-gray-700 rounded-md animate-pulse" />
-                <div className="h-5 w-32 bg-gray-200 dark:bg-gray-700 rounded animate-pulse" />
-            </div>
-            <div className="flex items-center gap-4">
-                <div className="w-8 h-8 bg-gray-200 dark:bg-gray-700 rounded-full animate-pulse" />
-                <div className="h-9 w-20 bg-gray-200 dark:bg-gray-700 rounded-md animate-pulse" />
-            </div>
+// ───── SKELETON COMPONENTS ─────
+const SkeletonCard = ({ rows = 4, tall = false }) => (
+    <div className={`bg-white dark:bg-gray-800/60 rounded-xl border border-gray-100 dark:border-gray-700/50 p-5 animate-pulse ${tall ? 'min-h-64' : ''}`}>
+        <div className="flex items-center justify-between mb-4">
+            <div className="h-4 w-28 bg-gray-200 dark:bg-gray-700 rounded" />
+            <div className="h-5 w-10 bg-gray-100 dark:bg-gray-700/60 rounded-full" />
+        </div>
+        <div className="space-y-2.5">
+            {[...Array(rows)].map((_, i) => (
+                <div key={i} className="flex items-center gap-3">
+                    <div className="h-2.5 flex-1 bg-gray-100 dark:bg-gray-700/60 rounded-full" style={{ maxWidth: `${75 - i * 8}%` }} />
+                    <div className="h-2.5 w-10 bg-gray-100 dark:bg-gray-700/60 rounded-full shrink-0" />
+                </div>
+            ))}
         </div>
     </div>
 );
 
-const SkeletonSidebar = () => (
-    <div className="fixed top-16 left-0 z-40 w-full md:w-64 h-[calc(100vh-4rem)] bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800">
-        <div className="p-5 space-y-6">
-            <div className="h-10 bg-gray-100 dark:bg-gray-800 rounded animate-pulse" />
-            <div className="space-y-4">
-                <div className="h-8 bg-gray-100 dark:bg-gray-800 rounded animate-pulse" />
-                {[...Array(12)].map((_, i) => (
-                    <div key={i} className="h-8 bg-gray-50 dark:bg-gray-800/50 rounded animate-pulse" />
-                ))}
-            </div>
-        </div>
+const SkeletonStatsCard = () => (
+    <div className="bg-white dark:bg-gray-800/60 rounded-xl border border-gray-100 dark:border-gray-700/50 p-4 animate-pulse">
+        <div className="h-8 w-14 bg-gray-200 dark:bg-gray-700 rounded mb-2" />
+        <div className="h-3 w-24 bg-gray-100 dark:bg-gray-700/60 rounded" />
     </div>
 );
 
 const SkeletonStats = () => (
-    <div className="max-w-7xl mx-auto space-y-10">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-5">
-            {[...Array(5)].map((_, i) => (
-                <div key={i} className="h-20 bg-gray-50 dark:bg-gray-800/60 rounded-lg animate-pulse" />
-            ))}
+    <div className="max-w-7xl mx-auto space-y-8">
+        {/* Overview stat cards */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+            {[...Array(5)].map((_, i) => <SkeletonStatsCard key={i} />)}
         </div>
 
+        {/* Main 8/4 column split */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            <div className="lg:col-span-8 space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="h-80 bg-gray-50 dark:bg-gray-800/60 rounded-lg animate-pulse" />
-                    <div className="h-80 bg-gray-50 dark:bg-gray-800/60 rounded-lg animate-pulse" />
-                    {[...Array(4)].map((_, i) => (
-                        <div key={i} className="h-64 bg-gray-50 dark:bg-gray-800/60 rounded-lg animate-pulse" />
-                    ))}
-                </div>
+            <div className="lg:col-span-8 space-y-5">
+                <SkeletonCard rows={6} tall />
+                <SkeletonCard rows={5} />
+                <SkeletonCard rows={4} />
+                <SkeletonCard rows={4} />
+                <SkeletonCard rows={5} />
             </div>
-
-            <div className="lg:col-span-4 space-y-6">
-                {[...Array(4)].map((_, i) => (
-                    <div key={i} className="h-80 bg-gray-50 dark:bg-gray-800/60 rounded-lg animate-pulse" />
-                ))}
+            <div className="lg:col-span-4 space-y-5">
+                <SkeletonCard rows={5} tall />
+                <SkeletonCard rows={6} tall />
+                <SkeletonCard rows={4} />
+                <SkeletonCard rows={4} />
             </div>
         </div>
     </div>
@@ -302,15 +295,16 @@ function MasterfileLanding() {
                 let raw = String(h.os_type || 'Unknown').trim();
                 let normalized = raw
                     .toLowerCase()
-                    .replace(/\s+/g, ' ')           // multiple spaces → one
-                    .replace(/32\s*bit/gi, '32-bit')
-                    .replace(/64\s*bit/gi, '64-bit')
-                    .replace(/windows\s*10\s*32\s*-?\s*bit/gi, 'windows 10 32-bit')
-                    .replace(/windows\s*10\s*64\s*-?\s*bit/gi, 'windows 10 64-bit')
-                    .replace(/windows\s*11\s*32\s*-?\s*bit/gi, 'windows 11 32-bit')
-                    .replace(/windows\s*11\s*64\s*-?\s*bit/gi, 'windows 11 64-bit')
-                    .replace(/windows\s*(\d+)\s*bit/gi, 'windows $1 bit')   // fallback
+                    .replace(/[–—]/g, '-')           // unicode dashes → ascii hyphen
+                    .replace(/\s*-\s*/g, ' ')         // strip dash separators ("11 - 64-Bit" → "11 64 Bit")
+                    .replace(/\s+/g, ' ')             // collapse spaces
+                    .replace(/(\d+)\s*bit/gi, '$1-bit')  // "64 bit" / "64bit" → "64-bit"
                     .trim();
+
+                // Windows 11 has no 32-bit edition, so treat a bare "Windows 11"
+                // the same as "Windows 11 64-Bit" — this merges new dropdown entries
+                // with legacy "Windows 11 - 64-Bit" records into one slice.
+                if (normalized === 'windows 11') normalized = 'windows 11 64-bit';
 
                 // Final clean key for grouping
                 const key = normalized;
@@ -379,15 +373,14 @@ function MasterfileLanding() {
                 // ─── Use exactly the same normalization as above! ───
                 let osKey = osRaw
                     .toLowerCase()
-                    .replace(/\s+/g, ' ')
-                    .replace(/32\s*bit/gi, '32-bit')
-                    .replace(/64\s*bit/gi, '64-bit')
-                    .replace(/windows\s*10\s*32\s*-?\s*bit/gi, 'windows 10 32-bit')
-                    .replace(/windows\s*10\s*64\s*-?\s*bit/gi, 'windows 10 64-bit')
-                    .replace(/windows\s*11\s*32\s*-?\s*bit/gi, 'windows 11 32-bit')
-                    .replace(/windows\s*11\s*64\s*-?\s*bit/gi, 'windows 11 64-bit')
-                    .replace(/windows\s*(\d+)\s*bit/gi, 'windows $1 bit')
+                    .replace(/[–—]/g, '-')           // unicode dashes → ascii hyphen
+                    .replace(/\s*-\s*/g, ' ')         // strip dash separators ("11 - 64-Bit" → "11 64 Bit")
+                    .replace(/\s+/g, ' ')             // collapse spaces
+                    .replace(/(\d+)\s*bit/gi, '$1-bit')  // "64 bit" / "64bit" → "64-bit"
                     .trim();
+
+                // Windows 11 has no 32-bit edition (see cpuPcData above) — keep keys in sync.
+                if (osKey === 'windows 11') osKey = 'windows 11 64-bit';
 
                 // Decide display name (same logic as above)
                 let displayOs = osKey;
