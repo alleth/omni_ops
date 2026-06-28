@@ -21,6 +21,13 @@ function MasterfileDirectory() {
     const [selectedSite, setSelectedSite] = useState(null);
     const [modalMode, setModalMode] = useState('view');
 
+    // ROO is a read-only viewer: can browse/filter sites but not add/edit/delete
+    const role = (() => {
+        try { return (JSON.parse(sessionStorage.getItem('user') || '{}').user_type || 'FSE').toString().trim().toUpperCase(); }
+        catch { return 'FSE'; }
+    })();
+    const isReadOnly = role === 'ROO';
+
     useEffect(() => {
         const loadData = async () => {
             const regionsResult = await fetchData('/api/region-tbl');
@@ -173,12 +180,14 @@ function MasterfileDirectory() {
                     Sites
                 </h1>
 
-                <button
-                    onClick={openCreateModal}
-                    className="px-4 py-2 text-sm font-medium bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors flex items-center gap-2"
-                >
-                    <span>+</span> Add New Site
-                </button>
+                {!isReadOnly && (
+                    <button
+                        onClick={openCreateModal}
+                        className="px-4 py-2 text-sm font-medium bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors flex items-center gap-2"
+                    >
+                        <span>+</span> Add New Site
+                    </button>
+                )}
             </div>
 
             {/* Filters */}
@@ -312,6 +321,7 @@ function MasterfileDirectory() {
                         refresh();
                     }}
                     mode={modalMode}
+                    readOnly={isReadOnly}
                 />
             )}
         </div>

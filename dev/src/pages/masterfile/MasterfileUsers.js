@@ -21,6 +21,8 @@ function RoleBadge({ userType }) {
         return <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300">ADM</span>;
     if (['SPV', 'SUPERVISOR'].includes(t))
         return <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300">SPV</span>;
+    if (t === 'ROO')
+        return <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">ROO</span>;
     return <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300">FSE</span>;
 }
 
@@ -73,8 +75,8 @@ function AddUserModal({ onClose, onSave, spvCluster, regionOptions, isADM }) {
             user_name:       form.user_name.trim(),
             user_pass:       form.user_pass,
             user_type:       form.user_type,
-            cluster_name:    form.user_type === 'ADM' ? 'All Cluster' : (isADM ? form.cluster_name : spvCluster),
-            region_assigned: form.user_type === 'ADM' ? '' : selectedRegions.map(r => r.value).join(','),
+            cluster_name:    ['ADM', 'ROO'].includes(form.user_type) ? 'All Cluster' : (isADM ? form.cluster_name : spvCluster),
+            region_assigned: ['ADM', 'ROO'].includes(form.user_type) ? '' : selectedRegions.map(r => r.value).join(','),
         });
         setSaving(false);
     };
@@ -141,12 +143,13 @@ function AddUserModal({ onClose, onSave, spvCluster, regionOptions, isADM }) {
                                 value={form.user_type}
                                 onChange={e => {
                                     const r = e.target.value;
-                                    setForm(p => ({ ...p, user_type: r, cluster_name: r === 'ADM' ? 'All Cluster' : '' }));
-                                    if (r === 'ADM') setSelectedRegions([]);
+                                    setForm(p => ({ ...p, user_type: r, cluster_name: ['ADM', 'ROO'].includes(r) ? 'All Cluster' : '' }));
+                                    if (['ADM', 'ROO'].includes(r)) setSelectedRegions([]);
                                 }}
                             >
                                 <option value="ADM">ADM (Administrator)</option>
                                 <option value="FSE">FSE (Field Service Engineer)</option>
+                                <option value="ROO">ROO (Read-Only Viewer)</option>
                             </select>
                         ) : (
                             <input type="text" value="FSE" disabled

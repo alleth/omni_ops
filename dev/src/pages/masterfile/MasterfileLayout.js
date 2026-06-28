@@ -72,6 +72,17 @@ function MasterfileLayout() {
         }
     }, [navigate]);
 
+    // Route guard for ROO (read-only viewer): block Dashboard & Users by direct URL
+    useEffect(() => {
+        const roleNow = (user?.user_type || 'FSE').toString().trim().toUpperCase();
+        if (roleNow === 'ROO') {
+            const allowed = ['/masterfile/inventory', '/masterfile/management', '/masterfile/directory', '/masterfile/profile'];
+            if (!allowed.includes(location.pathname)) {
+                navigate('/masterfile/inventory', { replace: true });
+            }
+        }
+    }, [user, location.pathname, navigate]);
+
     // Early return if not logged in
     if (!user?.user_name) {
         return null;
@@ -95,12 +106,19 @@ function MasterfileLayout() {
                 { icon: HiBookOpen, label: "Directory", path: "/masterfile/directory" },
                 { icon: HiUserGroup, label: "Users", path: "/masterfile/users" },
             ]
-            : [
-                { icon: HiHome, label: "Dashboard", path: "/masterfile/home" },
-                { icon: HiDeviceMobile, label: "Hardware Inventory", path: "/masterfile/inventory" },
-                { icon: HiClipboardList, label: "Hardware Management", path: "/masterfile/management" },
-                { icon: HiBookOpen, label: "Directory", path: "/masterfile/directory" },
-            ];
+            : role === 'ROO'
+                ? [
+                    // Read-only viewer: view/filter hardware & sites, no Dashboard or Users
+                    { icon: HiDeviceMobile, label: "Hardware Inventory", path: "/masterfile/inventory" },
+                    { icon: HiClipboardList, label: "Hardware Management", path: "/masterfile/management" },
+                    { icon: HiBookOpen, label: "Directory", path: "/masterfile/directory" },
+                ]
+                : [
+                    { icon: HiHome, label: "Dashboard", path: "/masterfile/home" },
+                    { icon: HiDeviceMobile, label: "Hardware Inventory", path: "/masterfile/inventory" },
+                    { icon: HiClipboardList, label: "Hardware Management", path: "/masterfile/management" },
+                    { icon: HiBookOpen, label: "Directory", path: "/masterfile/directory" },
+                ];
 
     const currentPath = location.pathname;
 

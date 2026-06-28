@@ -174,7 +174,7 @@ const getFileUrl = (path) => {
     return `http://192.168.4.95:8888${path}`;
 };
 
-const HardwareDetailModal = ({ item, request, siteMap, regionMap, onClose, onAttachSuccess }) => {
+const HardwareDetailModal = ({ item, request, siteMap, regionMap, onClose, onAttachSuccess, readOnly = false }) => {
     const { postFormData } = useApi();
     const user = useMemo(() => JSON.parse(sessionStorage.getItem('user') || '{}'), []);
 
@@ -351,6 +351,14 @@ const HardwareDetailModal = ({ item, request, siteMap, regionMap, onClose, onAtt
                                 <p className="text-xs text-center text-gray-400 dark:text-gray-500">
                                     File is locked once submitted. Contact your supervisor to replace it.
                                 </p>
+                            </div>
+                        ) : readOnly ? (
+                            /* ── Read-only viewer (ROO): show status only, no upload ── */
+                            <div className="flex items-start gap-3 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-3.5">
+                                <svg className="w-4 h-4 text-gray-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                                </svg>
+                                <p className="text-xs text-gray-600 dark:text-gray-400">No pull-out form on file for this hardware.</p>
                             </div>
                         ) : (
                             /* ── Case 2 & 3: no attachment — allow upload ── */
@@ -572,7 +580,7 @@ function MasterfileInventory() {
 
                 let allowedRegions = [];
 
-                if (role === 'ADM' && user.cluster_name === 'All Cluster') {
+                if ((role === 'ADM' && user.cluster_name === 'All Cluster') || role === 'ROO') {
                     allowedRegions = regionRes.regionTbl;
                 } else if (['SPV', 'SUPERVISOR'].includes(role) && user.cluster_name) {
                     allowedRegions = regionRes.regionTbl.filter(
@@ -1210,7 +1218,7 @@ function MasterfileInventory() {
     // Human-readable scope labels driven by the active dropdowns + role.
     const reportRegionLabel = selectedRegion
         ? (regionMap[selectedRegion] || selectedRegion)
-        : (role === 'ADM' && user.cluster_name === 'All Cluster')
+        : ((role === 'ADM' && user.cluster_name === 'All Cluster') || role === 'ROO')
             ? 'All Regions'
             : (['SPV', 'SUPERVISOR'].includes(role) && user.cluster_name)
                 ? `All Regions in ${user.cluster_name}`
@@ -1831,6 +1839,7 @@ function MasterfileInventory() {
                 siteMap={siteMap}
                 regionMap={regionMap}
                 onClose={() => setViewDetailItem(null)}
+                readOnly={role === 'ROO'}
                 onAttachSuccess={async () => {
                     const reqResult = await stableFetchData.current('/api/request-tbl.json');
                     setPulloutRequests(reqResult?.requests || []);

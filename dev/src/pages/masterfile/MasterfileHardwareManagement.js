@@ -387,7 +387,7 @@ const ChevronDown = () => (
 );
 
 // ─── Config Modal ─────────────────────────────────────────────────────────────
-function ConfigModal({ hw, siteMap, regionMap, cpuView, serverView, onClose, onSaved }) {
+function ConfigModal({ hw, siteMap, regionMap, cpuView, serverView, onClose, onSaved, readOnly = false }) {
     const { postData, loading: saving } = useApi();
     const [form, setForm]       = useState(() => {
         // Strip stored placeholders ("Not Set", etc.) on open so they don't linger
@@ -410,7 +410,6 @@ function ConfigModal({ hw, siteMap, regionMap, cpuView, serverView, onClose, onS
 
     const site       = siteMap[hw.site_code] || {};
     const regionName = regionMap[String(site.region_id || '')] || regionMap[String(hw.region_name || '')] || '—';
-    const ageYrs     = computeAge(hw.hw_date_acq);
 
     const handleChange = e => {
         const { name, value } = e.target;
@@ -472,13 +471,15 @@ function ConfigModal({ hw, siteMap, regionMap, cpuView, serverView, onClose, onS
                         </p>
                     </div>
                     <div className="flex items-center gap-2 ml-4 flex-shrink-0">
-                        <button
-                            onClick={handleSave}
-                            disabled={saving}
-                            className="px-4 py-1.5 text-xs font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-                        >
-                            {saving ? 'Saving…' : 'Save Changes'}
-                        </button>
+                        {!readOnly && (
+                            <button
+                                onClick={handleSave}
+                                disabled={saving}
+                                className="px-4 py-1.5 text-xs font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                            >
+                                {saving ? 'Saving…' : 'Save Changes'}
+                            </button>
+                        )}
                         <button
                             onClick={onClose}
                             className="p-1.5 rounded-full text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
@@ -502,7 +503,9 @@ function ConfigModal({ hw, siteMap, regionMap, cpuView, serverView, onClose, onS
                 )}
 
                 {/* Scrollable body */}
-                <div className="overflow-y-auto flex-1 px-6 py-4 space-y-6">
+                <div className="overflow-y-auto flex-1 px-6 py-4">
+                  {/* fieldset[disabled] makes every control inside non-editable for ROO viewers */}
+                  <fieldset disabled={readOnly} className="space-y-6 m-0 p-0 border-0 min-w-0">
 
                     {/* Hardware Identity — always shown, read-only */}
                     <div>
@@ -511,10 +514,7 @@ function ConfigModal({ hw, siteMap, regionMap, cpuView, serverView, onClose, onS
                             <ReadField label="Asset #"    value={hw.hw_asset_num} />
                             <ReadField label="Serial #"   value={hw.hw_serial_num} />
                             <ReadField label="Status"     value={hw.hw_status} />
-                            <div>
-                                <p className={labelCls}>Age</p>
-                                <p className={`py-1 text-sm font-medium ${ageColor(ageYrs)}`}>{formatAge(ageYrs)}</p>
-                            </div>
+                            <ReadField label="Date Acquired" value={hw.hw_date_acq} />
                         </div>
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-4">
                             <ReadField label="Region" value={regionName} />
@@ -858,6 +858,7 @@ function ConfigModal({ hw, siteMap, regionMap, cpuView, serverView, onClose, onS
                             )}
                         </>
                     )}
+                  </fieldset>
                 </div>
 
                 {/* Footer */}
@@ -865,9 +866,11 @@ function ConfigModal({ hw, siteMap, regionMap, cpuView, serverView, onClose, onS
                     <button onClick={onClose} className="px-5 py-2 text-sm font-medium text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors">
                         Close
                     </button>
-                    <button onClick={handleSave} disabled={saving} className="px-5 py-2 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors">
-                        {saving ? 'Saving…' : 'Save Changes'}
-                    </button>
+                    {!readOnly && (
+                        <button onClick={handleSave} disabled={saving} className="px-5 py-2 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+                            {saving ? 'Saving…' : 'Save Changes'}
+                        </button>
+                    )}
                 </div>
             </div>
         </div>,
@@ -901,12 +904,12 @@ function MasterfileHardwareManagement() {
     // ── Role detection ─────────────────────────────────────────────────────
     const user = useMemo(() => { try { return JSON.parse(sessionStorage.getItem('user') || '{}'); } catch { return {}; } }, []);
     const role  = (user.user_type || 'FSE').toString().trim().toUpperCase();
-    const isFSE = !['ADM', 'ADMIN', 'ADMINISTRATOR', 'SPV', 'SUPERVISOR'].includes(role);
+    const isFSE = !['ADM', 'ADMIN', 'ADMINISTRATOR', 'SPV', 'SUPERVISOR', 'ROO'].includes(role);
 
     // ── Allowed region IDs ────────────────────────────────────────────────
     const allowedRegionIds = useMemo(() => {
         if (!allRegions.length) return [];
-        if (role === 'ADM' && user.cluster_name === 'All Cluster') {
+        if ((role === 'ADM' && user.cluster_name === 'All Cluster') || role === 'ROO') {
             return allRegions.map(r => String(r.region_id));
         }
         if (['SPV', 'SUPERVISOR'].includes(role) && user.cluster_name) {
@@ -930,7 +933,7 @@ function MasterfileHardwareManagement() {
     }, [hardware, siteMap, allowedRegionIds]);
 
     const scopeLabel = useMemo(() => {
-        if (role === 'ADM' && user.cluster_name === 'All Cluster') return null;
+        if ((role === 'ADM' && user.cluster_name === 'All Cluster') || role === 'ROO') return null;
         if (['SPV', 'SUPERVISOR'].includes(role)) return `Cluster: ${user.cluster_name || '—'}`;
         const names = allowedRegionIds.map(id => regionMap[id]).filter(Boolean);
         return `Region: ${names.join(', ') || '—'}`;
@@ -1833,6 +1836,7 @@ function MasterfileHardwareManagement() {
                     serverView={serverView}
                     onClose={() => setSelected(null)}
                     onSaved={handleSaved}
+                    readOnly={role === 'ROO'}
                 />
             )}
 

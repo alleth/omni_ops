@@ -161,11 +161,12 @@ Protected routes:
 
 ### Role-Based Access
 
-`user_type` controls both data scope and UI capabilities. The roles are **not a hierarchy** — FSE is the editing role, while ADM/SPV have broader data scope but are read-only for hardware records.
+`user_type` controls both data scope and UI capabilities. The roles are **not a hierarchy** — FSE is the editing role, while ADM/SPV/ROO have broader data scope but are read-only for hardware records.
 
 - `FSE` (default) — can add hardware, edit hardware, create bulk pull-out/relocation requests; scoped to their `region_assigned` IDs. No Users management tab.
-- `ADM` — read-only in inventory/management views; full data scope if `cluster_name === 'All Cluster'` (all regions), otherwise same region scoping as FSE. In Users tab: can reset any user's password and add new users via a role dropdown (ADM or FSE) — for a new ADM, cluster auto-sets to `'All Cluster'` and the Region Assigned field is hidden; for a new FSE, cluster and region are editable. In `AddHardwareModal`, matched as `['ADM', 'ADMIN', 'ADMINISTRATOR']`.
+- `ADM` — read-only in inventory/management views; full data scope if `cluster_name === 'All Cluster'` (all regions), otherwise same region scoping as FSE. In Users tab: can reset any user's password and add new users via a role dropdown (ADM, FSE, or ROO) — for a new ADM, cluster auto-sets to `'All Cluster'` and the Region Assigned field is hidden; for a new FSE, cluster and region are editable. In `AddHardwareModal`, matched as `['ADM', 'ADMIN', 'ADMINISTRATOR']`.
 - `SPV` / `SUPERVISOR` — read-only in inventory; scoped to all regions sharing their `cluster_name`. In Users tab: can add new FSE users scoped to their cluster and reset passwords; region column is hidden for SPV.
+- `ROO` — read-only viewer with **org-wide** data scope (all regions, like ADM `'All Cluster'`). Sees only three sidebar items: Hardware Inventory, Hardware Management, Directory (no Dashboard, no Users). Can browse, filter, and export (Generate Report) but cannot add/edit/delete hardware, sites, or upload pull-out attachments. Enforced client-side: `MasterfileLayout` redirects ROO off `/home` and `/users` and logs them in at `/inventory`; Inventory/Management gate edit UI off `role === 'FSE'`; `MasterfileDirectory` hides "Add New Site" and passes `readOnly` to `SiteDetailsModal` (which hides Edit/Delete); `HardwareDetailModal` hides the attachment-upload zone. ADM can create ROO users via the Users-tab role dropdown (cluster auto-sets to `'All Cluster'`, region hidden).
 
 `region_assigned` is a comma-separated string of region IDs; the inventory page filters hardware to the user's assigned regions. ADM with `cluster_name === 'All Cluster'` bypasses this filter entirely.
 

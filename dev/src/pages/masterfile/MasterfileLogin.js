@@ -48,7 +48,9 @@ function MasterfileLogin() {
 
             if (response.ok) {
                 sessionStorage.setItem('user', JSON.stringify(data.user));
-                navigate('/masterfile/home');
+                // ROO is a read-only viewer with no Dashboard access — land on Inventory
+                const landingType = (data.user?.user_type || '').toString().trim().toUpperCase();
+                navigate(landingType === 'ROO' ? '/masterfile/inventory' : '/masterfile/home');
             } else {
                 setError(data.error || 'Login failed');
             }
