@@ -84,6 +84,7 @@ return function (RouteBuilder $routes): void {
         $builder->post('/hw-tbl', ['controller' => 'HwTbl', 'action' => 'add']);
         $builder->post('/user-tbl/add', ['controller' => 'UserTbl', 'action' => 'add']);
         $builder->post('/user-tbl/reset-password', ['controller' => 'UserTbl', 'action' => 'resetPassword']);
+        $builder->post('/user-tbl/update-region', ['controller' => 'UserTbl', 'action' => 'updateRegion']);
         $builder->fallbacks();
     });
 

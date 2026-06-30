@@ -387,7 +387,7 @@ const ChevronDown = () => (
 );
 
 // ─── Config Modal ─────────────────────────────────────────────────────────────
-function ConfigModal({ hw, siteMap, regionMap, cpuView, serverView, onClose, onSaved, readOnly = false }) {
+function ConfigModal({ hw, allHardware = [], siteMap, regionMap, cpuView, serverView, onClose, onSaved, readOnly = false }) {
     const { postData, loading: saving } = useApi();
     const [form, setForm]       = useState(() => {
         // Strip stored placeholders ("Not Set", etc.) on open so they don't linger
@@ -435,6 +435,23 @@ function ConfigModal({ hw, siteMap, regionMap, cpuView, serverView, onClose, onS
         return p;
     };
 
+    // Reject a duplicate IP / MAC against any other on-site unit, regardless of
+    // region. MACs are compared by hex digits only so separator style doesn't matter.
+    const findNetworkDuplicate = (field, rawVal) => {
+        const ok = field === 'hw_ip_add' ? isValidIp(rawVal) : isValidMac(rawVal);
+        if (!ok) return null;
+        const norm = v => field === 'hw_mac_add'
+            ? String(v).replace(/[^0-9A-Fa-f]/g, '').toLowerCase()
+            : String(v).trim().toLowerCase();
+        const target = norm(rawVal);
+        return allHardware.find(h => {
+            if (String(h.hw_id) === String(form.hw_id)) return false;
+            if (!['on site', 'onsite'].includes(String(h.hw_status || '').trim().toLowerCase())) return false;
+            const other = h[field];
+            return other && norm(other) === target;
+        }) || null;
+    };
+
     const handleSave = async () => {
         setSaveError(null);
         const payload = isCpu
@@ -442,6 +459,21 @@ function ConfigModal({ hw, siteMap, regionMap, cpuView, serverView, onClose, onS
             : isServerCategory(hw.item_desc)
             ? buildPayload(SERVER_VIEW_SAVE_FIELDS[serverView] || [])
             : buildPayload(Object.keys(form));
+
+        const dupChecks = [
+            { field: 'hw_ip_add',  label: 'IP address' },
+            { field: 'hw_mac_add', label: 'MAC address' },
+        ];
+        for (const { field, label } of dupChecks) {
+            if (field in payload) {
+                const dup = findNetworkDuplicate(field, payload[field]);
+                if (dup) {
+                    setSaveError(`${label} ${payload[field]} is already assigned to ${dup.hw_asset_num || 'another unit'} at site ${dup.site_code || '—'}. Duplicate ${label}es are not allowed.`);
+                    return;
+                }
+            }
+        }
+
         const res = await postData('/api/hw-tbl/update.json', payload);
         if (res?.success) {
             setSaved(true);
@@ -1830,6 +1862,7 @@ function MasterfileHardwareManagement() {
             {selected && (
                 <ConfigModal
                     hw={selected}
+                    allHardware={hardware}
                     siteMap={siteMap}
                     regionMap={regionMap}
                     cpuView={cpuView}

@@ -287,6 +287,75 @@ function ResetPasswordModal({ user, onClose, onSave }) {
     );
 }
 
+// ─── Edit Region Modal ───────────────────────────────────────────────────────
+
+function EditRegionModal({ user, regionOptions, onClose, onSave }) {
+    const [selectedRegions, setSelectedRegions] = useState(
+        () => (user.region_assigned || '')
+            .split(',')
+            .map(s => s.trim())
+            .filter(Boolean)
+            .map(id => regionOptions.find(o => o.value === id) || { value: id, label: `Region ${id}` })
+    );
+    const [saving, setSaving] = useState(false);
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        setSaving(true);
+        await onSave(selectedRegions.map(r => r.value).join(','));
+        setSaving(false);
+    };
+
+    return createPortal(
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md">
+                <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                    <div>
+                        <h2 className="text-lg font-bold text-gray-800 dark:text-white">Reassign Region</h2>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                            {user.fname} {user.lname} &bull; @{user.user_name}
+                        </p>
+                    </div>
+                    <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-2xl leading-none">×</button>
+                </div>
+
+                <form onSubmit={handleSubmit} className="px-6 py-4 space-y-4">
+                    <div>
+                        <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Region Assigned</label>
+                        <Select
+                            isMulti
+                            options={regionOptions}
+                            value={selectedRegions}
+                            onChange={(v) => setSelectedRegions(v || [])}
+                            placeholder="Select regions..."
+                            classNamePrefix="react-select"
+                            styles={{
+                                control: (b) => ({ ...b, minHeight: 38, fontSize: 14 }),
+                                menu:    (b) => ({ ...b, zIndex: 9999 }),
+                            }}
+                        />
+                        <p className="text-xs text-gray-400 dark:text-gray-500 mt-1.5">
+                            Clearing all regions removes this user's hardware access.
+                        </p>
+                    </div>
+
+                    <div className="flex gap-3 pt-2">
+                        <button type="button" onClick={onClose}
+                            className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg text-sm hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                            Cancel
+                        </button>
+                        <button type="submit" disabled={saving}
+                            className="flex-1 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium disabled:opacity-50 transition-colors">
+                            {saving ? 'Saving...' : 'Save Region'}
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>,
+        getModalRoot()
+    );
+}
+
 // ─── Main Page ───────────────────────────────────────────────────────────────
 
 function MasterfileUsers() {
@@ -303,9 +372,10 @@ function MasterfileUsers() {
     const [search,  setSearch]  = useState('');
     const [toast,   setToast]   = useState(null);
 
-    const [showAddModal,   setShowAddModal]   = useState(false);
-    const [showResetModal, setShowResetModal] = useState(false);
-    const [selectedUser,   setSelectedUser]   = useState(null);
+    const [showAddModal,    setShowAddModal]    = useState(false);
+    const [showResetModal,  setShowResetModal]  = useState(false);
+    const [showRegionModal, setShowRegionModal] = useState(false);
+    const [selectedUser,    setSelectedUser]    = useState(null);
 
     // keep a stable ref to fetchData — avoids re-render loops since useApi
     // recreates fetchData on every render (it's not wrapped in useCallback)
@@ -399,6 +469,25 @@ function MasterfileUsers() {
         }
     };
 
+    const handleUpdateRegion = async (regionAssigned) => {
+        const res = await postData('/api/user-tbl/update-region.json', {
+            user_id:         selectedUser.id,
+            region_assigned: regionAssigned,
+        });
+        if (res?.success) {
+            showToast('Region assignment updated');
+            setShowRegionModal(false);
+            setSelectedUser(null);
+            loadData();
+        } else {
+            showToast(res?.error || 'Failed to update region', 'error');
+        }
+    };
+
+    // Region reassignment applies to region-scoped (FSE) users only — ADM/SPV/ROO
+    // are cluster- or org-wide and have no per-region assignment.
+    const isRegionScoped = (u) => (u.user_type || '').toString().trim().toUpperCase() === 'FSE';
+
     const canManage = isADM || isSPV;
     const colCount  = canManage ? 6 : 5;
 
@@ -482,12 +571,22 @@ function MasterfileUsers() {
                                     {canManage && (
                                         <td className="px-4 py-3">
                                             {u.id !== user.id && (
-                                                <button
-                                                    onClick={() => { setSelectedUser(u); setShowResetModal(true); }}
-                                                    className="px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 dark:bg-amber-900/20 dark:text-amber-400 dark:hover:bg-amber-900/40 border border-amber-200 dark:border-amber-800 rounded-lg transition-colors"
-                                                >
-                                                    Reset Password
-                                                </button>
+                                                <div className="flex items-center gap-2">
+                                                    <button
+                                                        onClick={() => { setSelectedUser(u); setShowResetModal(true); }}
+                                                        className="px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 dark:bg-amber-900/20 dark:text-amber-400 dark:hover:bg-amber-900/40 border border-amber-200 dark:border-amber-800 rounded-lg transition-colors"
+                                                    >
+                                                        Reset Password
+                                                    </button>
+                                                    {isADM && isRegionScoped(u) && (
+                                                        <button
+                                                            onClick={() => { setSelectedUser(u); setShowRegionModal(true); }}
+                                                            className="px-3 py-1.5 text-xs font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-900/20 dark:text-indigo-400 dark:hover:bg-indigo-900/40 border border-indigo-200 dark:border-indigo-800 rounded-lg transition-colors"
+                                                        >
+                                                            Reassign Region
+                                                        </button>
+                                                    )}
+                                                </div>
                                             )}
                                         </td>
                                     )}
@@ -528,6 +627,14 @@ function MasterfileUsers() {
                     user={selectedUser}
                     onClose={() => { setShowResetModal(false); setSelectedUser(null); }}
                     onSave={handleResetPassword}
+                />
+            )}
+            {showRegionModal && selectedUser && (
+                <EditRegionModal
+                    user={selectedUser}
+                    regionOptions={regionOptions}
+                    onClose={() => { setShowRegionModal(false); setSelectedUser(null); }}
+                    onSave={handleUpdateRegion}
                 />
             )}
         </div>

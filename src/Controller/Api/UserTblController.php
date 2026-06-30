@@ -160,6 +160,49 @@ class UserTblController extends AppController
             ->withStringBody(json_encode(['success' => false, 'error' => 'Could not reset password']));
     }
 
+    public function updateRegion()
+    {
+        $this->request->allowMethod(['post']);
+
+        $data   = $this->request->getData();
+        $userId = $data['user_id'] ?? null;
+
+        if (!$userId) {
+            return $this->response->withStatus(400)->withType('json')
+                ->withStringBody(json_encode(['success' => false, 'error' => 'user_id is required']));
+        }
+
+        try {
+            $user = $this->UserTbl->get($userId);
+        } catch (\Cake\Datasource\Exception\RecordNotFoundException $e) {
+            return $this->response->withStatus(404)->withType('json')
+                ->withStringBody(json_encode(['success' => false, 'error' => 'User not found']));
+        }
+
+        // Assign directly (not patchEntity) so this admin action never touches the
+        // acting user's own Auth session — unlike edit()/updateProfile().
+        $user->region_assigned = $data['region_assigned'] ?? '';
+        if (isset($data['cluster_name'])) {
+            $user->cluster_name = $data['cluster_name'];
+        }
+
+        if ($this->UserTbl->save($user)) {
+            return $this->response->withType('json')
+                ->withStringBody(json_encode([
+                    'success'         => true,
+                    'message'         => 'Region assignment updated successfully',
+                    'region_assigned' => $user->region_assigned,
+                ]));
+        }
+
+        return $this->response->withStatus(400)->withType('json')
+            ->withStringBody(json_encode([
+                'success' => false,
+                'error'   => 'Could not update region assignment',
+                'errors'  => $user->getErrors(),
+            ]));
+    }
+
     public function edit($id = null)
     {
         $userTbl = $this->UserTbl->get($id);
