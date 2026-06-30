@@ -996,7 +996,7 @@ function MasterfileHardwareManagement() {
         if (!filterHwCategory) return 'Search asset, serial, brand, model, site…';
         if (filterHwCategory === 'CPU') {
             if (cpuView === 'os_antivirus')    return 'Search asset, serial, site, OS type, antivirus, .NET…';
-            if (cpuView === 'core_facilities') return 'Search asset, serial, site, core build…';
+            if (cpuView === 'core_facilities') return 'Search asset, serial, site, core build, facilities (IMS-AIU, MV-MAINT…)…';
             if (cpuView === 'hostname_ip_mac') return 'Search asset, serial, site, hostname, IP, MAC…';
             if (cpuView === 'workstep_user')   return 'Search asset, serial, site, user, primary role…';
             if (cpuView === 'hdd_age')         return 'Search asset, serial, site, memory, HDD capacity…';
@@ -1028,7 +1028,7 @@ function MasterfileHardwareManagement() {
                 // View-specific fields
                 if (filterHwCategory === 'CPU') {
                     if (cpuView === 'os_antivirus')    return s('os_type') || s('hw_antivi') || s('dotnet');
-                    if (cpuView === 'core_facilities') return s('core_buid');
+                    if (cpuView === 'core_facilities') return s('core_buid') || installedFacilities(h).some(f => f.toLowerCase().includes(term));
                     if (cpuView === 'hostname_ip_mac') return s('hw_host_name') || s('hw_ip_add') || s('hw_mac_add');
                     if (cpuView === 'workstep_user')   return s('hw_user_name') || s('hw_primary_role');
                     if (cpuView === 'hdd_age')         return s('hw_memory') || s('hdd_capacity') || s('hw_date_acq');

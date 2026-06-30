@@ -29,7 +29,7 @@ use Cake\ORM\Entity;
  * @property string|null $sr_date
  * @property string|null $return_date
  * @property string|null $delivery_method
- * @property int|null $tracking_num
+ * @property string|null $tracking_num
  * @property string|null $delivered_by
  * @property string|null $pickup_date
  * @property string|null $date_transfer

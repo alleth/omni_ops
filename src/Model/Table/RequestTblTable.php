@@ -141,7 +141,8 @@ class RequestTblTable extends Table
             ->allowEmptyString('delivery_method');
 
         $validator
-            ->integer('tracking_num')
+            ->scalar('tracking_num')
+            ->maxLength('tracking_num', 100)
             ->allowEmptyString('tracking_num');
 
         $validator
