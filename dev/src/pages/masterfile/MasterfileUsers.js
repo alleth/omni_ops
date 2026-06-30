@@ -484,9 +484,12 @@ function MasterfileUsers() {
         }
     };
 
-    // Region reassignment applies to region-scoped (FSE) users only — ADM/SPV/ROO
-    // are cluster- or org-wide and have no per-region assignment.
-    const isRegionScoped = (u) => (u.user_type || '').toString().trim().toUpperCase() === 'FSE';
+    // Region reassignment applies to region-scoped users — i.e. anyone who is NOT
+    // an admin/supervisor (cluster- or org-wide). This mirrors exactly when the
+    // Region column shows a value, so the button appears for every FSE row even if
+    // user_type is stored blank/null or as a non-canonical variant.
+    const isRegionScoped = (u) =>
+        !['ADM', 'ADMIN', 'ADMINISTRATOR', 'SPV', 'SUPERVISOR'].includes((u.user_type || '').toString().trim().toUpperCase());
 
     const canManage = isADM || isSPV;
     const colCount  = canManage ? 6 : 5;
