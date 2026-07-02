@@ -34,7 +34,7 @@ const trxnOptions = [
     { value: 'MV',     label: 'MV – Motor Vehicle' },
     { value: 'LETAS',  label: 'LETAS – Law Enforcement & Traffic Adjudication System' },
     { value: 'MAIDRS', label: 'MAIDRS' },
-    { value: 'MV New', label: 'MV New – MV New Registration' },
+    { value: 'NRU',    label: 'NRU – New Registration Unit' },
     { value: 'None',   label: 'None' },
 ];
 

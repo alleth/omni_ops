@@ -48,6 +48,35 @@ function MasterfileDirectory() {
         loadData();
     }, []);
 
+    // ── Summary counts (recomputed whenever the sites list changes, e.g. after a delete) ──
+    const siteStats = useMemo(() => {
+        const has = (site, needle) => (site.office_type || '').toLowerCase().includes(needle);
+        const trxnSet = (site) => new Set(
+            (site.trxn_catered || '').split(',').map(v => v.trim().toUpperCase()).filter(Boolean)
+        );
+        return {
+            total: sites.length,
+            nru: sites.filter(s => has(s, 'nru') || has(s, 'new registration')).length,
+            dlro: sites.filter(s => has(s, 'dlro') || has(s, "driver's license renewal")).length,
+            // "Mixed" = caters to MV, DL and LETAS all together
+            mixed: sites.filter(s => {
+                const t = trxnSet(s);
+                return t.has('MV') && t.has('DL') && t.has('LETAS');
+            }).length,
+            districtOffice: sites.filter(s => has(s, 'district office')).length,
+            licensing: sites.filter(s => has(s, 'licensing center')).length,
+        };
+    }, [sites]);
+
+    const statCards = [
+        { label: 'Total Sites', value: siteStats.total, accent: 'text-gray-900 dark:text-gray-100' },
+        { label: 'NRU', value: siteStats.nru, accent: 'text-indigo-600 dark:text-indigo-400' },
+        { label: 'DLRO', value: siteStats.dlro, accent: 'text-emerald-600 dark:text-emerald-400' },
+        { label: 'Mixed Trxn (MV/DL/LETAS)', value: siteStats.mixed, accent: 'text-amber-600 dark:text-amber-400' },
+        { label: 'District Office', value: siteStats.districtOffice, accent: 'text-sky-600 dark:text-sky-400' },
+        { label: 'Licensing Center', value: siteStats.licensing, accent: 'text-rose-600 dark:text-rose-400' },
+    ];
+
     const columnHelper = createColumnHelper();
 
     const columns = useMemo(
@@ -188,6 +217,21 @@ function MasterfileDirectory() {
                         <span>+</span> Add New Site
                     </button>
                 )}
+            </div>
+
+            {/* Summary counts */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                {statCards.map(card => (
+                    <div
+                        key={card.label}
+                        className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 px-4 py-3"
+                    >
+                        <p className="text-xs text-gray-500 dark:text-gray-400 leading-tight">{card.label}</p>
+                        <p className={`mt-1 text-2xl font-semibold ${card.accent}`}>
+                            {loading ? '—' : card.value.toLocaleString()}
+                        </p>
+                    </div>
+                ))}
             </div>
 
             {/* Filters */}

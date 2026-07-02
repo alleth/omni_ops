@@ -3,9 +3,48 @@ import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { XMarkIcon, ChevronRightIcon, ArrowDownTrayIcon } from '@heroicons/react/24/outline';
 import * as XLSX from 'xlsx';
+import Select from 'react-select';
 import { useApi } from '../../hooks/useApi';
 import AddHardwareModal from './components/AddHardwareModal';
 import BulkRequestModal from './components/BulkRequestModal';
+
+// ── Searchable dropdown (region / site / type) — react-select, dark-mode aware ──
+const searchSelectClassNames = {
+    control: ({ isFocused, isDisabled }) =>
+        `border rounded-xl bg-white dark:bg-gray-800 px-2 min-h-[42px] text-sm ${
+            isDisabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'
+        } ${isFocused ? 'border-indigo-500 ring-2 ring-indigo-500/20' : 'border-gray-300 dark:border-gray-600'}`,
+    menu: () => 'mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl text-sm overflow-hidden',
+    menuList: () => 'max-h-60 overflow-y-auto',
+    option: ({ isSelected, isFocused }) =>
+        `px-3 py-2 cursor-pointer ${
+            isSelected ? 'bg-indigo-600 text-white'
+            : isFocused ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300'
+            : 'text-gray-800 dark:text-gray-200'
+        }`,
+    placeholder: () => 'text-gray-400 dark:text-gray-500',
+    singleValue: () => 'text-gray-900 dark:text-gray-100',
+    input: () => 'text-gray-900 dark:text-gray-100',
+    noOptionsMessage: () => 'px-3 py-2 text-gray-400 dark:text-gray-500',
+    dropdownIndicator: () => 'p-1 text-gray-400',
+    clearIndicator: () => 'p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 cursor-pointer',
+    indicatorSeparator: () => 'hidden',
+};
+
+const SearchableSelect = ({ value, onChange, options, placeholder, isDisabled = false, isClearable = true }) => (
+    <Select
+        unstyled
+        isClearable={isClearable}
+        isDisabled={isDisabled}
+        placeholder={placeholder}
+        options={options}
+        value={options.find(o => o.value === value) || null}
+        onChange={opt => onChange(opt ? opt.value : '')}
+        classNames={searchSelectClassNames}
+        menuPortalTarget={typeof document !== 'undefined' ? document.body : null}
+        styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }}
+    />
+);
 
 // ── Skeleton components ──
 const SkeletonRow = () => (
@@ -174,8 +213,8 @@ const getFileUrl = (path) => {
     return `http://192.168.4.95:8888${path}`;
 };
 
-const HardwareDetailModal = ({ item, request, siteMap, regionMap, onClose, onAttachSuccess, readOnly = false }) => {
-    const { postFormData } = useApi();
+const HardwareDetailModal = ({ item, request, siteMap, regionMap, onClose, onAttachSuccess, onRequestUpdated, readOnly = false }) => {
+    const { postFormData, postData } = useApi();
     const user = useMemo(() => JSON.parse(sessionStorage.getItem('user') || '{}'), []);
 
     const [attachFile, setAttachFile] = useState(null);
@@ -184,6 +223,42 @@ const HardwareDetailModal = ({ item, request, siteMap, regionMap, onClose, onAtt
     const [attachSuccess, setAttachSuccess] = useState(false);
     const [imgPreviewUrl, setImgPreviewUrl] = useState(null);
     const fileInputRef = useRef(null);
+
+    // ── Tracking number (viewable even when empty; editable when a request exists) ──
+    const [localTracking, setLocalTracking] = useState(request?.tracking_num || '');
+    const [editingTracking, setEditingTracking] = useState(false);
+    const [trackingInput, setTrackingInput] = useState('');
+    const [trackingSaving, setTrackingSaving] = useState(false);
+    const [trackingError, setTrackingError] = useState('');
+
+    useEffect(() => {
+        setLocalTracking(request?.tracking_num || '');
+        setEditingTracking(false);
+        setTrackingError('');
+    }, [request?.request_id, request?.tracking_num]);
+
+    const handleSaveTracking = async () => {
+        if (!request?.request_id) return;
+        setTrackingSaving(true);
+        setTrackingError('');
+        try {
+            const res = await postData('/api/request-tbl/update.json', {
+                request_id: request.request_id,
+                tracking_num: trackingInput.trim(),
+            });
+            if (res?.success) {
+                setLocalTracking(trackingInput.trim());
+                setEditingTracking(false);
+                onRequestUpdated?.();
+            } else {
+                setTrackingError(res?.message || 'Failed to save tracking number.');
+            }
+        } catch (err) {
+            setTrackingError('Failed to save tracking number.');
+        } finally {
+            setTrackingSaving(false);
+        }
+    };
 
     const hasAttachment = request && String(request.attachment_path || '').trim();
     const fileUrl = hasAttachment ? getFileUrl(request.attachment_path) : null;
@@ -478,10 +553,54 @@ const HardwareDetailModal = ({ item, request, siteMap, regionMap, onClose, onAtt
                                     {request.delivery_method && (
                                         <DetailField label="Delivery" value={request.delivery_method === 'courier' ? 'Courier' : 'Personal Pickup'} />
                                     )}
-                                    {request.tracking_num && <DetailField label="Tracking No." value={request.tracking_num} mono />}
                                     {request.delivered_by && <DetailField label="Delivered By" value={request.delivered_by} />}
                                     {request.pickup_date && <DetailField label="Pickup Date" value={request.pickup_date} />}
                                     {request.return_date && <DetailField label="Return Date" value={request.return_date} />}
+
+                                    {/* Tracking No. — always shown; can be added/edited when not read-only */}
+                                    <div className="col-span-2">
+                                        <p className="text-xs text-gray-400 dark:text-gray-500 mb-0.5">Tracking No.</p>
+                                        {editingTracking ? (
+                                            <div className="flex items-center gap-2">
+                                                <input
+                                                    type="text"
+                                                    value={trackingInput}
+                                                    onChange={e => setTrackingInput(e.target.value)}
+                                                    placeholder="Enter tracking number"
+                                                    className="flex-1 px-3 py-1.5 text-sm font-mono rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
+                                                />
+                                                <button
+                                                    onClick={handleSaveTracking}
+                                                    disabled={trackingSaving}
+                                                    className="px-3 py-1.5 text-xs font-medium bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-md transition-colors"
+                                                >
+                                                    {trackingSaving ? 'Saving…' : 'Save'}
+                                                </button>
+                                                <button
+                                                    onClick={() => { setEditingTracking(false); setTrackingError(''); }}
+                                                    disabled={trackingSaving}
+                                                    className="px-3 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-md transition-colors"
+                                                >
+                                                    Cancel
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <div className="flex items-center gap-3">
+                                                <p className={`text-sm font-medium font-mono ${localTracking ? 'text-gray-800 dark:text-gray-100' : 'text-gray-400 dark:text-gray-600'}`}>
+                                                    {localTracking || '—'}
+                                                </p>
+                                                {!readOnly && request?.request_id && (
+                                                    <button
+                                                        onClick={() => { setTrackingInput(localTracking); setEditingTracking(true); setTrackingError(''); }}
+                                                        className="text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300"
+                                                    >
+                                                        {localTracking ? 'Edit' : 'Add tracking number'}
+                                                    </button>
+                                                )}
+                                            </div>
+                                        )}
+                                        {trackingError && <p className="text-xs text-red-500 mt-1">{trackingError}</p>}
+                                    </div>
                                 </div>
                                 {request.remarks && (
                                     <div>
@@ -1283,50 +1402,35 @@ function MasterfileInventory() {
                         {showRegionDropdown && (
                             <div className="space-y-1.5">
                                 <label className="block text-xs text-gray-600 dark:text-gray-400">Region</label>
-                                <select
+                                <SearchableSelect
                                     value={selectedRegion}
-                                    onChange={e => { setSelectedRegion(e.target.value); setSelectedSite(''); setCurrentPage(1); }}
-                                    className={selectClasses}
-                                    style={selectStyle}
-                                >
-                                    <option value="">All regions</option>
-                                    {availableRegions.map(r => (
-                                        <option key={r.region_id} value={r.region_id}>{r.region_name}</option>
-                                    ))}
-                                </select>
+                                    onChange={val => { setSelectedRegion(val); setSelectedSite(''); setCurrentPage(1); }}
+                                    options={availableRegions.map(r => ({ value: String(r.region_id), label: r.region_name }))}
+                                    placeholder="All regions"
+                                />
                             </div>
                         )}
 
                         <div className="space-y-1.5">
                             <label className="block text-xs text-gray-600 dark:text-gray-400">Site</label>
-                            <select
+                            <SearchableSelect
                                 value={selectedSite}
-                                onChange={e => { setSelectedSite(e.target.value); setCurrentPage(1); }}
-                                disabled={!selectedRegion && showRegionDropdown}
-                                className={`${selectClasses} disabled:opacity-50 disabled:cursor-not-allowed`}
-                                style={selectStyle}
-                            >
-                                <option value="">All sites</option>
-                                {filteredSites.map(s => (
-                                    <option key={s.site_code} value={s.site_code}>
-                                        {s.site_code} – {s.site_name}
-                                    </option>
-                                ))}
-                            </select>
+                                onChange={val => { setSelectedSite(val); setCurrentPage(1); }}
+                                options={filteredSites.map(s => ({ value: s.site_code, label: `${s.site_code} – ${s.site_name}` }))}
+                                placeholder="All sites"
+                                isDisabled={!selectedRegion && showRegionDropdown}
+                            />
                         </div>
 
                         <div className="space-y-1.5">
                             <label className="block text-xs text-gray-600 dark:text-gray-400">Type</label>
-                            <select
+                            <SearchableSelect
                                 value={selectedType}
-                                onChange={e => { setSelectedType(e.target.value); setCurrentPage(1); }}
-                                disabled={isLoading}
-                                className={`${selectClasses} disabled:opacity-50 disabled:cursor-not-allowed`}
-                                style={selectStyle}
-                            >
-                                <option value="">All types</option>
-                                {hwTypes.map(t => <option key={t} value={t}>{t}</option>)}
-                            </select>
+                                onChange={val => { setSelectedType(val); setCurrentPage(1); }}
+                                options={hwTypes.map(t => ({ value: t, label: t }))}
+                                placeholder="All types"
+                                isDisabled={isLoading}
+                            />
                         </div>
 
                         <div className="space-y-1.5">
@@ -1844,6 +1948,10 @@ function MasterfileInventory() {
                     const reqResult = await stableFetchData.current('/api/request-tbl.json');
                     setPulloutRequests(reqResult?.requests || []);
                     setViewDetailItem(null);
+                }}
+                onRequestUpdated={async () => {
+                    const reqResult = await stableFetchData.current('/api/request-tbl.json');
+                    setPulloutRequests(reqResult?.requests || []);
                 }}
             />
 
