@@ -7,6 +7,7 @@ import {
     HiDeviceMobile,
     HiClipboardList,
     HiBookOpen,
+    HiDocumentReport,
     HiUser,
     HiUserGroup,
     HiLogout,
@@ -104,6 +105,7 @@ function MasterfileLayout() {
                 { icon: HiDeviceMobile, label: "Hardware Inventory", path: "/masterfile/inventory" },
                 { icon: HiClipboardList, label: "Hardware Management", path: "/masterfile/management" },
                 { icon: HiBookOpen, label: "Directory", path: "/masterfile/directory" },
+                { icon: HiDocumentReport, label: "Reports", path: "/masterfile/reports" },
                 { icon: HiUserGroup, label: "Users", path: "/masterfile/users" },
             ]
             : role === 'ROO'
@@ -118,6 +120,7 @@ function MasterfileLayout() {
                     { icon: HiDeviceMobile, label: "Hardware Inventory", path: "/masterfile/inventory" },
                     { icon: HiClipboardList, label: "Hardware Management", path: "/masterfile/management" },
                     { icon: HiBookOpen, label: "Directory", path: "/masterfile/directory" },
+                    { icon: HiDocumentReport, label: "Reports", path: "/masterfile/reports" },
                 ];
 
     const currentPath = location.pathname;
