@@ -34,6 +34,9 @@ vendor/bin/phpunit tests/TestCase/Controller/Api/HwTblControllerTest.php
 composer cs-check
 composer cs-fix
 
+# Tests + style check together
+composer check
+
 # Generate migration
 php bin/cake bake migration AlterHwTbl
 
@@ -102,7 +105,7 @@ omni_ops/
 
 ### Backend API
 
-All endpoints are under `/api/` prefix, return JSON, and have CSRF disabled (handled by CORS preflight). CORS is configured per-controller in `beforeFilter()`. Configuration varies:
+All endpoints are under `/api/` prefix, return JSON, and have CSRF disabled (handled by CORS preflight). Responses over 1 KB are gzip-compressed by `App\Middleware\GzipMiddleware` (registered in `Application.php`) — this is done in PHP because Apache `mod_deflate` is disabled in the XAMPP setups this app runs on; the full `hw-tbl` payload is ~12 MB raw / ~0.5 MB gzipped. CORS is configured per-controller in `beforeFilter()`. Configuration varies:
 - `HwTblController`, `RegionTblController`, `RequestTblController`, `SiteListTblController` — allow `*` origin (mirrors the request's `Origin` header)
 - `UserTblController` — explicit allowlist (`http://localhost:3000`, `http://omniops.local`) with `credentials: true`
 - `ItemBrandController`, `ItemDescriptionController`, `ItemModelsController` — hardcoded `http://localhost:3000` only; **these will fail in production** unless the origin is updated to the production domain
@@ -123,6 +126,7 @@ Key endpoints:
 - `POST /api/user-tbl/update-region.json` — reassign a user's regions (`user_id` + comma-separated `region_assigned`; maps to `updateRegion()`)
 - `GET /api/request-tbl.json` — hardware requests; query params: `requested_by`, `status` (PENDING/APPROVED/REJECTED/CANCELED), `cluster_name`
 - `POST /api/request-tbl.json` — create request (multipart/form-data, supports file uploads); `request_type` is `PULL_OUT` or `RELOCATION`
+- `POST /api/request-tbl/update.json` — patch fields on an existing request (`request_id` required in body); used by the Pull-Out detail modal to let non-ROO users add/edit the tracking number
 - `POST /api/request-tbl/updateAttachment/:id.json` — replace attachment on an existing request (SPV only; multipart/form-data)
 - `GET /api/item-brand.json`, `GET /api/item-description.json`, `GET /api/item-models.json` — cascading dropdown data
 
@@ -142,9 +146,9 @@ React Router with `basename="/public"`. Public routes: `/`, `/masterfile`, `/mas
 
 Protected routes:
 - `/masterfile/home` → `MasterfileDashboard` (request overview, role-filtered)
-- `/masterfile/inventory` → `MasterfileInventory` (hardware table with bulk request; default 10 rows/page). Includes accuracy report cards, each opening a modal overlay: **Profile Accuracy** (per-field completeness breakdown for asset/serial/type/brand/model/OS, with OS scoped to CPU/PC items), **Duplicate Entries** (duplicate asset/serial groups among On Site hardware), and **Pull-Out Attachment Coverage** (hardware missing a pull-out form on file; supports viewing/uploading an attachment for legacy records).
+- `/masterfile/inventory` → `MasterfileInventory` (hardware table with bulk request; default 10 rows/page). Region/site/type filters are searchable react-select dropdowns (`SearchableSelect`, defined at the top of the file). The full hardware list and pull-out requests are fetched once on mount; the On Site / Pull Out status toggle filters in memory (no refetch). Includes accuracy report cards, each opening a modal overlay: **Profile Accuracy** (per-field completeness breakdown for asset/serial/type/brand/model/OS, with OS scoped to CPU/PC items), **Duplicate Entries** (duplicate asset/serial groups among On Site hardware), and **Pull-Out Attachment Coverage** (hardware missing a pull-out form on file; supports viewing/uploading an attachment for legacy records).
 - `/masterfile/management` → `MasterfileHardwareManagement` (hardware aging table: age computation, HDD health badges, `PAGE_SIZE=30`). CPU rows have a sub-view toggle: `os_facilities`, `hostname_ip_mac`, `workstep_user`, `hdd_age`. `CONFIG_FIELDS` per category (CPU/SERVER/SWITCH) defines which fields count toward config completeness. `installedFacilities()` maps boolean DB columns (`rsu_fac`, `mv_dto`, `mv_maint`, `ims_aiu`, `dl_dto`, `dl_maint`, `dotnet`) to display labels. A "Generate Report" button exports the currently filtered rows to Excel via the `xlsx` (SheetJS) package — exported columns match the active hardware type and sub-view, all active filters (region/site/search/type/sub-view) apply, and the filename encodes type/region/date.
-- `/masterfile/directory` → `MasterfileDirectory` (site directory with TanStack Table v8 + `SiteDetailsModal`; global filter across site_code, site_name, office_type, address, trxn_catered, ownership, region)
+- `/masterfile/directory` → `MasterfileDirectory` (site directory with TanStack Table v8 + `SiteDetailsModal`; global filter across site_code, site_name, office_type, address, trxn_catered, ownership, region). Summary count cards (Total, NRU, DLRO, Mixed MV/DL/LETAS, District Office, Licensing Center) recompute after deletes. Note: the `NRU` trxn option replaced the former "MV New" in `SiteDetailsModal`.
 - `/masterfile/users` → `MasterfileUsers` (user management table; SPV can add new FSE users scoped to their cluster and reset passwords; ADM can add new users as either ADM or FSE (role dropdown) and reset passwords; FSE has no access). A "Reassign Region" action (`EditRegionModal` → `POST /api/user-tbl/update-region.json`) is available for any region-scoped user (i.e. not ADM/ROO with org-wide scope); clearing all regions removes that user's hardware access.
 - `/masterfile/profile` → `MasterfileProfile` (password change, profile edit; save only enabled when fields actually changed)
 

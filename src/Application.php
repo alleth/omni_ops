@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace App;
 
+use App\Middleware\GzipMiddleware;
 use Cake\Core\Configure;
 use Cake\Core\ContainerInterface;
 use Cake\Datasource\FactoryLocator;
@@ -45,6 +46,7 @@ class Application extends BaseApplication
     {
         $middlewareQueue
             ->add(new ErrorHandlerMiddleware(Configure::read('Error'), $this))
+            ->add(new GzipMiddleware())
             ->add(new AssetMiddleware(['cacheTime' => Configure::read('Asset.cacheTime')]))
             ->add(new RoutingMiddleware($this))
             ->add(new BodyParserMiddleware());

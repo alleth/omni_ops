@@ -631,7 +631,7 @@ function MasterfileInventory() {
     const role = (user.user_type || 'FSE').toString().trim().toUpperCase();
     const isFSE = role === 'FSE';
 
-    const [hardware, setHardware] = useState([]);
+    const [allHardware, setAllHardware] = useState([]);
     const [allSites, setAllSites] = useState([]);
     const [availableRegions, setAvailableRegions] = useState([]);
     const [allowedRegionIds, setAllowedRegionIds] = useState([]);
@@ -643,8 +643,6 @@ function MasterfileInventory() {
 
     const [baseLoading, setBaseLoading] = useState(true);
     const [hardwareLoading, setHardwareLoading] = useState(false);
-
-    const [hwTypes, setHwTypes] = useState([]);
 
     const [currentPage, setCurrentPage] = useState(1);
     const [rowsPerPage, setRowsPerPage] = useState(10);
@@ -729,54 +727,53 @@ function MasterfileInventory() {
         loadBaseData();
     }, [userRegionIds, role, user.cluster_name]);
 
+    // Fetch the full hardware list once — the On Site / Pull Out toggle
+    // filters in memory (see `hardware` memo) instead of re-downloading
+    // the entire table on every switch.
     useEffect(() => {
         const loadHardware = async () => {
             setHardwareLoading(true);
             try {
-                const isPullOutView = statusFilter === 'Pull Out';
-
                 const [hwResult, reqResult] = await Promise.all([
                     stableFetchData.current('/api/hw-tbl.json'),
-                    isPullOutView
-                        ? stableFetchData.current('/api/request-tbl.json')
-                        : Promise.resolve(null),
+                    stableFetchData.current('/api/request-tbl.json'),
                 ]);
 
-                const allHw = hwResult?.hwTbl || [];
-
-                let filteredHw;
-                if (statusFilter === 'On Site') {
-                    filteredHw = allHw.filter(item =>
-                        item.hw_status === 'On Site' || item.hw_status === 'Onsite'
-                    );
-                } else if (isPullOutView) {
-                    filteredHw = allHw.filter(item =>
-                        item.hw_status === 'Pull Out' || item.hw_status === 'Pullout'
-                    );
-                } else {
-                    filteredHw = allHw;
-                }
-
-                setHardware(filteredHw);
+                setAllHardware(hwResult?.hwTbl || []);
                 setPulloutRequests(reqResult?.requests || []);
-
-                const typeMap = {};
-                filteredHw.forEach(item => {
-                    const type = (item.item_desc || '').trim();
-                    if (type) typeMap[type.toLowerCase()] = type;
-                });
-                setHwTypes(Object.values(typeMap).sort());
             } catch (err) {
                 console.error('Failed to load hardware:', err);
-                setHardware([]);
-                setHwTypes([]);
+                setAllHardware([]);
             } finally {
                 setHardwareLoading(false);
             }
         };
 
         loadHardware();
-    }, [statusFilter]);
+    }, []);
+
+    const hardware = useMemo(() => {
+        if (statusFilter === 'On Site') {
+            return allHardware.filter(item =>
+                item.hw_status === 'On Site' || item.hw_status === 'Onsite'
+            );
+        }
+        if (statusFilter === 'Pull Out') {
+            return allHardware.filter(item =>
+                item.hw_status === 'Pull Out' || item.hw_status === 'Pullout'
+            );
+        }
+        return allHardware;
+    }, [allHardware, statusFilter]);
+
+    const hwTypes = useMemo(() => {
+        const typeMap = {};
+        hardware.forEach(item => {
+            const type = (item.item_desc || '').trim();
+            if (type) typeMap[type.toLowerCase()] = type;
+        });
+        return Object.values(typeMap).sort();
+    }, [hardware]);
 
     // Reset selection when filter/page changes
     useEffect(() => {
@@ -1159,11 +1156,7 @@ function MasterfileInventory() {
                 setIsModalOpen(false);
 
                 const updatedResponse = await fetchData('/api/hw-tbl.json');
-                const updatedHw = updatedResponse?.hwTbl || [];
-                const filteredHw = updatedHw.filter(item =>
-                    item.hw_status === 'On Site' || item.hw_status === 'Onsite'
-                );
-                setHardware(filteredHw);
+                setAllHardware(updatedResponse?.hwTbl || []);
             }
         } catch (err) {
             console.error('Submit error:', err);
@@ -1278,13 +1271,7 @@ function MasterfileInventory() {
                 setTimeout(() => setHighlightedRowId(null), 4000);
 
                 const updatedResponse = await fetchData('/api/hw-tbl.json');
-                const updatedHw = updatedResponse?.hwTbl || [];
-                const filteredHw = updatedHw.filter(item =>
-                    statusFilter === 'On Site'
-                        ? item.hw_status === 'On Site' || item.hw_status === 'Onsite'
-                        : item.hw_status === 'Pull Out' || item.hw_status === 'Pullout'
-                );
-                setHardware(filteredHw);
+                setAllHardware(updatedResponse?.hwTbl || []);
             }
         } catch (err) {
             console.error('Update error:', err);
