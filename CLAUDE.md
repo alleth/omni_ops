@@ -57,7 +57,9 @@ npm run build    # Outputs to dev/build/ — copy to webroot/public/ for deploym
 npm test         # Jest watch mode
 ```
 
-> **Testing note**: PHPUnit tests exist for backend controllers under `tests/TestCase/Controller/Api/`. The frontend has only a placeholder `App.test.js` — no meaningful React tests exist yet.
+npm is the package manager (`package-lock.json` is tracked). An untracked `dev/yarn.lock` also exists — do not use yarn or commit that file.
+
+> **Testing note**: PHPUnit tests exist for backend controllers under `tests/TestCase/Controller/Api/`. The frontend has only a placeholder `App.test.js` — no meaningful React tests exist yet. `RegionsControllerTest.php` is an orphaned bake artifact referencing `App\Controller\Api\RegionsController`, a class that doesn't exist (only `RegionTblController` does) — it fatal-errors on autoload if the suite hits it; don't mistake that failure for something you broke.
 
 ## Architecture
 
