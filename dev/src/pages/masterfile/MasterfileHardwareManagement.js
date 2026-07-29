@@ -1006,22 +1006,23 @@ function MasterfileHardwareManagement() {
     }, []);
 
     // ── Filter option lists ────────────────────────────────────────────────
+    // Sourced from the region/site reference tables (scoped to allowedRegionIds),
+    // not from baseHardware — options must stay available even when a region/site
+    // currently has no matching on-site hardware, mirroring MasterfileInventory.js.
     const regionOptions = useMemo(() => {
-        const seen = new Set();
-        return baseHardware
-            .map(h => String(h.region_name || ''))
-            .filter(v => v && !seen.has(v) && seen.add(v))
+        return allRegions
+            .filter(r => allowedRegionIds.includes(String(r.region_id)))
+            .map(r => String(r.region_id))
             .sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
-    }, [baseHardware]);
+    }, [allRegions, allowedRegionIds]);
 
     const sitesForRegion = useMemo(() => {
-        const seen = new Set();
-        return baseHardware
-            .filter(h => !filterRegion || String(h.region_name) === filterRegion)
-            .map(h => h.site_code)
-            .filter(v => v && !seen.has(v) && seen.add(v))
+        const regionScope = filterRegion ? [filterRegion] : allowedRegionIds;
+        return Object.values(siteMap)
+            .filter(s => regionScope.includes(String(s.region_id)))
+            .map(s => s.site_code)
             .sort();
-    }, [baseHardware, filterRegion]);
+    }, [siteMap, filterRegion, allowedRegionIds]);
 
     // ── Search placeholder — reflects current view's searchable columns ──────
     const searchPlaceholder = useMemo(() => {
