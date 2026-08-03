@@ -545,12 +545,15 @@ export default function RequestDetailModal({
                                 </div>
                             )}
 
-                            {isPullOut && currentRequest.tracking_num && (
-                                <div className="border-t border-gray-100 dark:border-gray-800 pt-4">
-                                    <h4 className="text-base font-medium text-gray-900 dark:text-gray-100 mb-2">Tracking Number</h4>
-                                    <p className="text-gray-900 dark:text-gray-100 font-medium">{currentRequest.tracking_num}</p>
+                            <div className="border-t border-gray-100 dark:border-gray-800 pt-4">
+                                <h4 className="text-base font-medium text-gray-900 dark:text-gray-100 mb-3">Tracking / SR Info</h4>
+                                <div className="grid grid-cols-2 gap-4 text-sm">
+                                    <div><span className="text-xs text-gray-500 dark:text-gray-400 block mb-0.5">Tracking Number</span><span className="text-gray-900 dark:text-gray-100 font-medium">{currentRequest.tracking_num || '—'}</span></div>
+                                    <div><span className="text-xs text-gray-500 dark:text-gray-400 block mb-0.5">SR Number</span><span className="text-gray-900 dark:text-gray-100 font-medium">{currentRequest.sr_num || '—'}</span></div>
+                                    <div><span className="text-xs text-gray-500 dark:text-gray-400 block mb-0.5">SR Date</span><span className="text-gray-900 dark:text-gray-100 font-medium">{currentRequest.sr_date || '—'}</span></div>
+                                    <div><span className="text-xs text-gray-500 dark:text-gray-400 block mb-0.5">Return Date</span><span className="text-gray-900 dark:text-gray-100 font-medium">{currentRequest.return_date || '—'}</span></div>
                                 </div>
-                            )}
+                            </div>
 
                             {currentRequest.remarks && (
                                 <div className="border-t border-gray-100 dark:border-gray-800 pt-4">
