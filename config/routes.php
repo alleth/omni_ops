@@ -86,6 +86,7 @@ return function (RouteBuilder $routes): void {
         $builder->post('/user-tbl/reset-password', ['controller' => 'UserTbl', 'action' => 'resetPassword']);
         $builder->post('/user-tbl/update-region', ['controller' => 'UserTbl', 'action' => 'updateRegion']);
         $builder->post('/user-tbl/update-role', ['controller' => 'UserTbl', 'action' => 'updateRole']);
+        $builder->post('/user-tbl/heartbeat', ['controller' => 'UserTbl', 'action' => 'heartbeat']);
         $builder->fallbacks();
     });
 

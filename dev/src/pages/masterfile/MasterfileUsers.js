@@ -26,6 +26,47 @@ function RoleBadge({ userType }) {
     return <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300">FSE</span>;
 }
 
+// ─── Presence (online/offline) ─────────────────────────────────────────────
+// "Online" = last_active within this window. MasterfileLayout's heartbeat
+// fires every 60s while a session is open, so 2x that gives a buffer for
+// network hiccups/timer drift without a stale heartbeat reading as "online".
+const ONLINE_THRESHOLD_MS = 2 * 60 * 1000;
+
+function formatLastActive(lastActive) {
+    if (!lastActive) return 'Never signed in';
+    const date = new Date(lastActive);
+    if (isNaN(date.getTime())) return 'Never signed in';
+    const diffMs  = Date.now() - date.getTime();
+    const diffMin = Math.floor(diffMs / 60000);
+    const diffHr  = Math.floor(diffMin / 60);
+    const diffDay = Math.floor(diffHr / 24);
+
+    if (diffMin < 1)  return 'just now';
+    if (diffMin === 1) return '1 minute ago';
+    if (diffMin < 60) return `${diffMin} minutes ago`;
+    if (diffHr === 1) return '1 hour ago';
+    if (diffHr < 24)  return `${diffHr} hours ago`;
+    if (diffDay === 1) return 'yesterday';
+    if (diffDay < 7)  return `${diffDay} days ago`;
+
+    const isThisYear = date.getFullYear() === new Date().getFullYear();
+    return date.toLocaleDateString([], isThisYear
+        ? { month: 'short', day: 'numeric' }
+        : { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function PresenceStatus({ lastActive }) {
+    const online = !!lastActive && (Date.now() - new Date(lastActive).getTime()) < ONLINE_THRESHOLD_MS;
+    return (
+        <span className="inline-flex items-center gap-1.5 text-xs">
+            <span className={`w-2 h-2 rounded-full shrink-0 ${online ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-gray-600'}`} />
+            {online
+                ? <span className="font-medium text-emerald-600 dark:text-emerald-400">Online</span>
+                : <span className="text-gray-400 dark:text-gray-500">{formatLastActive(lastActive)}</span>}
+        </span>
+    );
+}
+
 function SkeletonRow({ cols }) {
     return (
         <tr>
@@ -534,6 +575,28 @@ function MasterfileUsers() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [reloadKey]);
 
+    // Silent background refresh so online/offline status stays current while
+    // this tab is open — deliberately bypasses loadData()/reloadKey so it
+    // doesn't re-trigger the full-table skeleton loader every tick.
+    useEffect(() => {
+        const endpoint = isSPV && user.cluster_name
+            ? `/api/user-tbl.json?cluster_name=${encodeURIComponent(user.cluster_name)}`
+            : '/api/user-tbl.json';
+        const refresh = () => {
+            if (document.visibilityState !== 'visible') return;
+            fetchRef.current(endpoint).then(res => {
+                if (res?.users) setUsers(res.users);
+            });
+        };
+        const interval = setInterval(refresh, 60000);
+        document.addEventListener('visibilitychange', refresh);
+        return () => {
+            clearInterval(interval);
+            document.removeEventListener('visibilitychange', refresh);
+        };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isSPV, user.cluster_name]);
+
     const regionMap = useMemo(() => {
         const map = {};
         regions.forEach(r => { map[String(r.region_id)] = r.region_name; });
@@ -625,7 +688,7 @@ function MasterfileUsers() {
         !['ADM', 'ADMIN', 'ADMINISTRATOR', 'SPV', 'SUPERVISOR'].includes((u.user_type || '').toString().trim().toUpperCase());
 
     const canManage = isADM || isSPV;
-    const colCount  = canManage ? 6 : 5;
+    const colCount  = canManage ? 7 : 6;
 
     return (
         <div className="p-4 md:p-6">
@@ -671,6 +734,7 @@ function MasterfileUsers() {
                                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Role</th>
                                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Cluster</th>
                                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Region</th>
+                                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</th>
                                 {canManage && (
                                     <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>
                                 )}
@@ -703,6 +767,9 @@ function MasterfileUsers() {
                                         {['ADM','ADMIN','ADMINISTRATOR','SPV','SUPERVISOR'].includes((u.user_type||'').toUpperCase())
                                             ? '—'
                                             : formatRegions(u.region_assigned)}
+                                    </td>
+                                    <td className="px-4 py-3">
+                                        <PresenceStatus lastActive={u.last_active} />
                                     </td>
                                     {canManage && (
                                         <td className="px-4 py-3">

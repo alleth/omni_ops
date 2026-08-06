@@ -51,7 +51,7 @@ class UserTblController extends AppController
         if ($this->request->accepts('application/json')) {
             $query = $this->UserTbl->find()->select([
                 'id', 'fname', 'lname', 'user_name', 'user_type',
-                'region_assigned', 'cluster_name',
+                'region_assigned', 'cluster_name', 'last_active',
             ]);
 
             $clusterName = $this->request->getQuery('cluster_name');
@@ -259,6 +259,59 @@ class UserTblController extends AppController
             ]));
     }
 
+    /**
+     * UTC "now" for the last_active column. Deliberately gmdate(), not
+     * date() — CakePHP reads/serialises datetime columns assuming
+     * App.defaultTimezone (UTC here), tagging the JSON it sends the
+     * frontend with an explicit "+00:00"; writing anything other than true
+     * UTC digits here would make that tag a lie and desync from what's
+     * actually stored, which is exactly what happened when this briefly
+     * wrote Asia/Manila wall-clock digits instead — the mismatch made
+     * fresh timestamps parse as hours in the future client-side, which
+     * always reads as "online". Plain UTC in, UTC-tagged ISO out, browser
+     * converts to local for free — keep it that way.
+     */
+    private function nowForPresence(): string
+    {
+        return gmdate('Y-m-d H:i:s');
+    }
+
+    /**
+     * Presence heartbeat — called periodically by the logged-in frontend
+     * (MasterfileLayout) while a session is open. Stamps last_active so the
+     * Users tab can show online/offline. Deliberately lightweight: no auth
+     * middleware round-trip, just a direct column update by user_id.
+     */
+    public function heartbeat()
+    {
+        $this->request->allowMethod(['post']);
+
+        $data   = $this->request->getData();
+        $userId = $data['user_id'] ?? null;
+
+        if (!$userId) {
+            return $this->response->withStatus(400)->withType('json')
+                ->withStringBody(json_encode(['success' => false, 'error' => 'user_id is required']));
+        }
+
+        try {
+            $user = $this->UserTbl->get($userId);
+        } catch (\Cake\Datasource\Exception\RecordNotFoundException $e) {
+            return $this->response->withStatus(404)->withType('json')
+                ->withStringBody(json_encode(['success' => false, 'error' => 'User not found']));
+        }
+
+        $user->last_active = $this->nowForPresence();
+
+        if ($this->UserTbl->save($user)) {
+            return $this->response->withType('json')
+                ->withStringBody(json_encode(['success' => true, 'last_active' => $user->last_active]));
+        }
+
+        return $this->response->withStatus(400)->withType('json')
+            ->withStringBody(json_encode(['success' => false, 'error' => 'Could not update last_active']));
+    }
+
     public function edit($id = null)
     {
         $userTbl = $this->UserTbl->get($id);
@@ -353,6 +406,12 @@ class UserTblController extends AppController
         $response = $this->response->withType('json');
 
         if ($user && password_verify($data['user_pass'], $user->user_pass)) {
+            // Stamp online status immediately on login — the frontend heartbeat
+            // (MasterfileLayout) keeps it fresh from here on for as long as a
+            // session stays open.
+            $user->last_active = $this->nowForPresence();
+            $this->UserTbl->save($user);
+
             $this->request->getSession()->write('Auth.User', [
                 'id' => $user->id,
                 'fname' => $user->fname,

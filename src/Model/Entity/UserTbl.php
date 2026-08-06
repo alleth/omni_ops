@@ -19,6 +19,7 @@ use Cake\ORM\Entity;
  * @property string|null $profile_picture
  * @property int $failed_attempts
  * @property \Cake\I18n\FrozenTime|null $lockout_until
+ * @property \Cake\I18n\FrozenTime|null $last_active
  */
 class UserTbl extends Entity
 {
@@ -42,5 +43,6 @@ class UserTbl extends Entity
         'profile_picture' => true,
         'failed_attempts' => true,
         'lockout_until' => true,
+        'last_active' => true,
     ];
 }

@@ -1124,13 +1124,18 @@ function MasterfileInventory() {
     }, [pulloutRequests]);
 
     // ── Accuracy stats (computed from full filtered+sorted set, not paginated) ──
+    // Case-insensitive on purpose: the DB has "Unreadable", "UNREADABLE", and
+    // "unreadable" all in live use (same for the other placeholders below), so
+    // matching is done against the upper-cased set rather than a handful of
+    // literal case variants — otherwise stray casings slip through as if they
+    // were real values and inflate duplicate-entry / accuracy counts.
     const PLACEHOLDER_VALUES = new Set([
         'NOT_APPLICABLE', 'TAG_REMOVED_UNREADABLE', 'UNREADABLE_MISSING',
-        'N/A', 'No Tag', 'Unreadable', 'n/a', 'null', 'NULL', 'Not Set', '',
+        'N/A', 'NO TAG', 'UNREADABLE', 'NULL', 'NOT SET', '',
     ]);
     const validField = (v) => {
         const s = String(v ?? '').trim();
-        return s && !PLACEHOLDER_VALUES.has(s) && !PLACEHOLDER_VALUES.has(s.toUpperCase());
+        return s !== '' && !PLACEHOLDER_VALUES.has(s.toUpperCase());
     };
 
     const accuracyStats = useMemo(() => {
@@ -1910,7 +1915,7 @@ function MasterfileInventory() {
                                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400">Type</th>
                                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400">Brand</th>
                                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400">Model</th>
-                                {(isFSE || statusFilter === 'Pull Out') && <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 w-24">Actions</th>}
+                                {(isFSE || isADM || statusFilter === 'Pull Out') && <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 w-24">Actions</th>}
                             </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
@@ -1969,9 +1974,9 @@ function MasterfileInventory() {
                                             <td className={`px-3 py-3 text-sm ${secondaryTextClass}`}>{item.item_desc || '—'}</td>
                                             <td className={`px-3 py-3 text-sm ${secondaryTextClass}`}>{item.hw_brand_name || '—'}</td>
                                             <td className={`px-3 py-3 text-sm ${secondaryTextClass}`}>{item.hw_model || '—'}</td>
-                                            {(isFSE || statusFilter === 'Pull Out') && (
+                                            {(isFSE || isADM || statusFilter === 'Pull Out') && (
                                                 <td className="px-3 py-3 text-sm">
-                                                    {isFSE && statusFilter === 'On Site' ? (
+                                                    {(isFSE || isADM) && statusFilter === 'On Site' ? (
                                                         <button
                                                             onClick={() => handleEdit(item)}
                                                             className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 text-xs font-medium"

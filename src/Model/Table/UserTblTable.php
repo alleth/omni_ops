@@ -98,6 +98,10 @@ class UserTblTable extends Table
             ->dateTime('lockout_until')
             ->allowEmptyDateTime('lockout_until');
 
+        $validator
+            ->dateTime('last_active')
+            ->allowEmptyDateTime('last_active');
+
         return $validator;
     }
 }

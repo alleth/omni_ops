@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Outlet, useLocation, Link, useNavigate } from 'react-router-dom';
 import { startSessionTimer } from '../../utils/session';
+import { useApi } from '../../hooks/useApi';
 import {
     HiMenuAlt3,
     HiHome,
@@ -16,9 +17,16 @@ import {
     HiSun
 } from 'react-icons/hi';
 
+const HEARTBEAT_INTERVAL_MS = 60 * 1000; // keep in sync with the "online" window read in MasterfileUsers.js
+
 function MasterfileLayout() {
     const navigate = useNavigate();
     const location = useLocation();
+    const { postData } = useApi();
+    // Stable ref — useApi() recreates postData every render, and depending on
+    // it directly would re-fire the heartbeat effect on every render too.
+    const postDataRef = useRef(postData);
+    useEffect(() => { postDataRef.current = postData; }, [postData]);
 
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
@@ -72,6 +80,25 @@ function MasterfileLayout() {
             startSessionTimer(() => navigate('/masterfile/login'));
         }
     }, [navigate]);
+
+    // Presence heartbeat — stamps last_active so the Users tab can show
+    // online/offline. Fires immediately (fresh status right after login/
+    // reload), then every 60s while the tab is visible; paused when
+    // backgrounded so a forgotten background tab doesn't read as "online".
+    useEffect(() => {
+        if (!user?.id) return undefined;
+        const beat = () => {
+            if (document.visibilityState !== 'visible') return;
+            postDataRef.current('/api/user-tbl/heartbeat.json', { user_id: user.id });
+        };
+        beat();
+        const interval = setInterval(beat, HEARTBEAT_INTERVAL_MS);
+        document.addEventListener('visibilitychange', beat);
+        return () => {
+            clearInterval(interval);
+            document.removeEventListener('visibilitychange', beat);
+        };
+    }, [user?.id]);
 
     // Route guard for ROO (read-only viewer): block Dashboard & Users by direct URL
     useEffect(() => {
