@@ -220,6 +220,10 @@ class HwTblTable extends Table
             ->allowEmptyString('hw_antivi');
 
         $validator
+            ->scalar('hw_antivi_meta')
+            ->allowEmptyString('hw_antivi_meta');
+
+        $validator
             ->scalar('ports_num')
             ->maxLength('ports_num', 11)
             ->allowEmptyString('ports_num');

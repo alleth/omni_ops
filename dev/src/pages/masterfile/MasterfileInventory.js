@@ -1,7 +1,10 @@
 // src/pages/masterfile/MasterfileInventory.js
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { XMarkIcon, ChevronRightIcon, ArrowDownTrayIcon } from '@heroicons/react/24/outline';
+import {
+    XMarkIcon, ChevronRightIcon, ArrowDownTrayIcon,
+    BellAlertIcon, ClipboardDocumentCheckIcon, DocumentDuplicateIcon, PaperClipIcon,
+} from '@heroicons/react/24/outline';
 import * as XLSX from 'xlsx';
 import Select from 'react-select';
 import { useApi } from '../../hooks/useApi';
@@ -122,42 +125,243 @@ const FieldBar = ({ label, pct, filled, total, note }) => {
     );
 };
 
-// ── Accuracy summary card (click opens a modal) ──
-const AccuracyCard = ({ title, pct, colorClass = 'bg-emerald-500', badge, badgeClass, hint, onClick }) => {
-    const barPct = pct !== null && pct !== undefined ? Math.min(100, Math.max(0, pct)) : null;
-    return (
-        <button
-            onClick={onClick}
-            className="w-full bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden text-left hover:border-blue-300 dark:hover:border-blue-700 hover:shadow-md transition-all group"
-        >
-            <div className="px-5 py-4 flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                    <p className="text-sm font-semibold text-gray-700 dark:text-gray-200">{title}</p>
-                    {hint && <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{hint}</p>}
+// ── Data Quality: per-tab content ──
+const ProfileAccuracyContent = ({ stats }) => (
+    <>
+        <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+            {stats.fullyProfiled.toLocaleString()} of {stats.total.toLocaleString()} records have asset number, serial number, brand, and model filled in.
+        </p>
+        <div className="space-y-3">
+            {stats.fieldStats.map(f => (
+                <FieldBar key={f.key} label={f.label} pct={f.pct} filled={f.filled} total={f.total} note={f.note} />
+            ))}
+        </div>
+    </>
+);
+
+const DuplicateGroupTable = ({ groups, accentClass, headerBgClass, valueTextClass, siteMap, regionMap }) => (
+    <div className="space-y-2">
+        {groups.map(({ value, items }) => (
+            <div key={value} className={`rounded-lg border ${accentClass} overflow-hidden`}>
+                <div className={`${headerBgClass} px-3 py-1.5 flex items-center gap-2`}>
+                    <span className={`text-xs font-mono font-semibold ${valueTextClass}`}>{value}</span>
+                    <span className="text-xs text-gray-400 dark:text-gray-500">· {items.length} entries</span>
                 </div>
-                <div className="flex items-center gap-2.5 shrink-0">
-                    {badge != null && (
-                        <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${badgeClass}`}>{badge}</span>
-                    )}
-                    {barPct !== null && (
-                        <span className="text-3xl font-bold text-gray-900 dark:text-gray-100">{barPct}%</span>
-                    )}
-                    <ChevronRightIcon className="w-4 h-4 text-gray-300 dark:text-gray-600 group-hover:text-blue-500 transition-colors" />
-                </div>
+                <table className="w-full text-xs">
+                    <thead>
+                        <tr className="bg-gray-50 dark:bg-gray-800/50 border-b border-gray-100 dark:border-gray-800">
+                            <th className="px-3 py-1.5 text-left text-gray-500 dark:text-gray-400 font-medium">Type</th>
+                            <th className="px-3 py-1.5 text-left text-gray-500 dark:text-gray-400 font-medium">Brand / Model</th>
+                            <th className="px-3 py-1.5 text-left text-gray-500 dark:text-gray-400 font-medium">Site</th>
+                            <th className="px-3 py-1.5 text-left text-gray-500 dark:text-gray-400 font-medium">Region</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {items.map(h => {
+                            const site = siteMap?.[h.site_code];
+                            const regionName = site ? (regionMap?.[String(site.region_id)] || h.region_name) : h.region_name;
+                            return (
+                                <tr key={h.hw_id} className="border-b border-gray-50 dark:border-gray-800/50 last:border-0">
+                                    <td className="px-3 py-1.5 text-gray-700 dark:text-gray-300">{h.item_desc || '—'}</td>
+                                    <td className="px-3 py-1.5 text-gray-700 dark:text-gray-300">{[h.hw_brand_name, h.hw_model].filter(Boolean).join(' / ') || '—'}</td>
+                                    <td className="px-3 py-1.5 font-mono text-gray-700 dark:text-gray-300">{h.site_code || '—'}</td>
+                                    <td className="px-3 py-1.5 text-gray-700 dark:text-gray-300">{regionName || '—'}</td>
+                                </tr>
+                            );
+                        })}
+                    </tbody>
+                </table>
             </div>
-            {barPct !== null && (
-                <div className="px-5 pb-4">
-                    <div className="w-full h-2.5 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
-                        <div className={`h-2.5 rounded-full transition-all duration-700 ${colorClass}`} style={{ width: `${barPct}%` }} />
-                    </div>
+        ))}
+    </div>
+);
+
+const DuplicateEntriesContent = ({ stats, siteMap, regionMap }) => (
+    stats.totalDuplicates === 0 ? (
+        <p className="text-sm text-gray-500 dark:text-gray-400">No duplicate asset numbers or serial numbers detected among On Site hardware.</p>
+    ) : (
+        <div className="space-y-6">
+            {stats.dupAssets.length > 0 && (
+                <div>
+                    <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
+                        Asset Number · {stats.dupAssets.length} duplicate group{stats.dupAssets.length !== 1 ? 's' : ''}
+                    </p>
+                    <DuplicateGroupTable
+                        groups={stats.dupAssets}
+                        accentClass="border-red-100 dark:border-red-900/30"
+                        headerBgClass="bg-red-50 dark:bg-red-900/20"
+                        valueTextClass="text-red-700 dark:text-red-400"
+                        siteMap={siteMap}
+                        regionMap={regionMap}
+                    />
                 </div>
             )}
-        </button>
+            {stats.dupSerials.length > 0 && (
+                <div>
+                    <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
+                        Serial Number · {stats.dupSerials.length} duplicate group{stats.dupSerials.length !== 1 ? 's' : ''}
+                    </p>
+                    <DuplicateGroupTable
+                        groups={stats.dupSerials}
+                        accentClass="border-amber-100 dark:border-amber-900/30"
+                        headerBgClass="bg-amber-50 dark:bg-amber-900/20"
+                        valueTextClass="text-amber-700 dark:text-amber-400"
+                        siteMap={siteMap}
+                        regionMap={regionMap}
+                    />
+                </div>
+            )}
+        </div>
+    )
+);
+
+const AttachmentCoverageContent = ({ stats, siteMap, regionMap }) => (
+    stats.noAttachment === 0 ? (
+        <p className="text-sm text-emerald-600 dark:text-emerald-400">All pulled-out hardware has a pull-out form on file.</p>
+    ) : (
+        <div>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+                {stats.noAttachment} pulled-out item{stats.noAttachment !== 1 ? 's have' : ' has'} no form on file.
+            </p>
+            <table className="w-full text-xs">
+                <thead>
+                    <tr className="bg-gray-50 dark:bg-gray-800/50 border-b border-gray-100 dark:border-gray-800">
+                        <th className="px-3 py-2 text-left text-gray-500 dark:text-gray-400 font-medium">Asset</th>
+                        <th className="px-3 py-2 text-left text-gray-500 dark:text-gray-400 font-medium">Type</th>
+                        <th className="px-3 py-2 text-left text-gray-500 dark:text-gray-400 font-medium">Site</th>
+                        <th className="px-3 py-2 text-left text-gray-500 dark:text-gray-400 font-medium">Region</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {stats.noAttachmentItems.map(h => {
+                        const site = siteMap?.[h.site_code];
+                        const regionName = site ? (regionMap?.[String(site.region_id)] || h.region_name) : h.region_name;
+                        return (
+                            <tr key={h.hw_id} className="border-b border-gray-50 dark:border-gray-800/50 last:border-0 hover:bg-gray-50 dark:hover:bg-gray-800/30">
+                                <td className="px-3 py-2 font-mono text-gray-700 dark:text-gray-300">{h.hw_asset_num || '—'}</td>
+                                <td className="px-3 py-2 text-gray-700 dark:text-gray-300">{h.item_desc || '—'}</td>
+                                <td className="px-3 py-2 font-mono text-gray-700 dark:text-gray-300">{h.site_code || '—'}</td>
+                                <td className="px-3 py-2 text-gray-700 dark:text-gray-300">{regionName || '—'}</td>
+                            </tr>
+                        );
+                    })}
+                </tbody>
+            </table>
+        </div>
+    )
+);
+
+const QUALITY_TABS = {
+    profile:    { label: 'Profile Accuracy',    icon: ClipboardDocumentCheckIcon },
+    duplicates: { label: 'Duplicate Entries',   icon: DocumentDuplicateIcon },
+    attachment: { label: 'Attachment Coverage', icon: PaperClipIcon },
+};
+
+// ── Data Quality: auto-appearing hint bubble (shown once per page visit) ──
+const QualityHintBubble = ({ issues, onOpen, onDismiss }) => {
+    const [phase, setPhase] = useState('enter'); // 'enter' | 'visible' | 'leave'
+
+    useEffect(() => {
+        const toVisible = setTimeout(() => setPhase('visible'), 20);
+        const toLeave = setTimeout(() => setPhase('leave'), 4500);
+        const toGone = setTimeout(onDismiss, 4850);
+        return () => { clearTimeout(toVisible); clearTimeout(toLeave); clearTimeout(toGone); };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    const flagged = issues.filter(i => i.severity !== 'ok');
+    if (flagged.length === 0) return null;
+    const summary = flagged.map(i => i.label).join(' & ');
+
+    return (
+        <div
+            className={`absolute right-0 top-full mt-2 w-72 z-40 origin-top-right transition-all duration-300 ease-out ${
+                phase === 'visible' ? 'opacity-100 scale-100 translate-y-0' : 'opacity-0 scale-90 -translate-y-1'
+            }`}
+        >
+            <div className="absolute -top-1.5 right-4 w-3 h-3 bg-white dark:bg-gray-900 border-t border-l border-amber-200 dark:border-amber-800/60 rotate-45" />
+            <div
+                role="button"
+                tabIndex={0}
+                onClick={() => onOpen(flagged[0].key)}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onOpen(flagged[0].key); }}
+                className="relative w-full text-left bg-white dark:bg-gray-900 border border-amber-200 dark:border-amber-800/60 rounded-xl shadow-xl px-4 py-3 flex items-start gap-2.5 cursor-pointer hover:border-amber-300 dark:hover:border-amber-700 hover:shadow-2xl transition-all"
+            >
+                <span className="mt-1 w-2 h-2 rounded-full bg-red-500 shrink-0 animate-pulse" />
+                <span className="min-w-0">
+                    <span className="block text-sm font-semibold text-gray-800 dark:text-gray-100">
+                        {flagged.length} data quality check{flagged.length !== 1 ? 's' : ''} need{flagged.length === 1 ? 's' : ''} a look
+                    </span>
+                    <span className="block text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">{summary} · tap to review</span>
+                </span>
+                <button
+                    onClick={(e) => { e.stopPropagation(); onDismiss(); }}
+                    className="ml-auto -mr-1 -mt-1 p-1 rounded-full text-gray-300 hover:text-gray-500 dark:text-gray-600 dark:hover:text-gray-300 shrink-0"
+                    aria-label="Dismiss"
+                >
+                    <XMarkIcon className="w-3.5 h-3.5" />
+                </button>
+            </div>
+        </div>
     );
 };
 
-// ── Accuracy detail modal ──
-const AccuracyModal = ({ title, onClose, children }) => {
+// ── Data Quality: bell button + summary popover (upper-right corner) ──
+const DataQualityBell = ({ issues, loading, open, onToggle, onSelect }) => {
+    const issueCount = issues.filter(i => i.severity !== 'ok').length;
+    return (
+        <div className="relative">
+            <button
+                type="button"
+                onClick={onToggle}
+                disabled={loading}
+                aria-label="Data quality alerts"
+                title="Data quality alerts"
+                className="relative p-2.5 rounded-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-500 dark:text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:border-indigo-300 dark:hover:border-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
+            >
+                <BellAlertIcon className="w-5 h-5" />
+                {!loading && issueCount > 0 && (
+                    <span className="absolute -top-1 -right-1 flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold leading-none">
+                        {issueCount}
+                    </span>
+                )}
+            </button>
+
+            {open && (
+                <div className="absolute right-0 top-full mt-2 w-80 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 shadow-2xl z-50 overflow-hidden">
+                    <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-800">
+                        <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">Data Quality</p>
+                        <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Checks against the currently filtered hardware</p>
+                    </div>
+                    <div className="py-1">
+                        {issues.map(item => (
+                            <button
+                                key={item.key}
+                                onClick={() => onSelect(item.key)}
+                                className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors"
+                            >
+                                <span className={`w-2 h-2 rounded-full shrink-0 ${
+                                    item.severity === 'ok' ? 'bg-emerald-500' : item.severity === 'warn' ? 'bg-amber-400' : 'bg-red-500'
+                                }`} />
+                                <span className="min-w-0 flex-1">
+                                    <span className="block text-sm font-medium text-gray-800 dark:text-gray-200">{item.label}</span>
+                                    <span className="block text-xs text-gray-400 dark:text-gray-500 truncate">{item.detail}</span>
+                                </span>
+                                {item.pct !== null && item.pct !== undefined && (
+                                    <span className="text-sm font-semibold text-gray-700 dark:text-gray-300 shrink-0">{item.pct}%</span>
+                                )}
+                                <ChevronRightIcon className="w-4 h-4 text-gray-300 dark:text-gray-600 shrink-0" />
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
+
+// ── Data Quality: sidebar-tabbed detail modal ──
+const DataQualityModal = ({ stats, tabs, activeTab, onTabChange, onClose, siteMap, regionMap }) => {
     const elRef = useRef(null);
     if (!elRef.current) elRef.current = document.createElement('div');
     useEffect(() => {
@@ -167,21 +371,48 @@ const AccuracyModal = ({ title, onClose, children }) => {
         const el = elRef.current;
         return () => { if (el.parentNode) el.parentNode.removeChild(el); };
     }, []);
+
     return createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
-            <div className="relative bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col border border-gray-200 dark:border-gray-800">
-                <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800 shrink-0">
-                    <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">{title}</h3>
-                    <button
-                        onClick={onClose}
-                        className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                    >
-                        <XMarkIcon className="w-5 h-5" />
-                    </button>
+            <div className="relative bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-3xl h-[75vh] max-h-[600px] flex overflow-hidden border border-gray-200 dark:border-gray-800">
+                <div className="w-44 sm:w-52 shrink-0 border-r border-gray-100 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-950/40 py-4 flex flex-col overflow-y-auto">
+                    <p className="px-4 pb-2 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">Data Quality</p>
+                    {tabs.map(key => {
+                        const tab = QUALITY_TABS[key];
+                        const Icon = tab.icon;
+                        const active = activeTab === key;
+                        return (
+                            <button
+                                key={key}
+                                onClick={() => onTabChange(key)}
+                                className={`flex items-center gap-2.5 px-4 py-2.5 text-sm text-left transition-colors ${
+                                    active
+                                        ? 'bg-white dark:bg-gray-900 text-indigo-600 dark:text-indigo-400 font-semibold border-r-2 border-indigo-500'
+                                        : 'text-gray-600 dark:text-gray-400 hover:bg-white/60 dark:hover:bg-gray-900/60'
+                                }`}
+                            >
+                                <Icon className="w-4 h-4 shrink-0" />
+                                <span className="truncate">{tab.label}</span>
+                            </button>
+                        );
+                    })}
                 </div>
-                <div className="overflow-y-auto px-6 py-5 flex-1">
-                    {children}
+                <div className="flex-1 flex flex-col min-w-0">
+                    <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800 shrink-0">
+                        <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">{QUALITY_TABS[activeTab]?.label}</h3>
+                        <button
+                            onClick={onClose}
+                            className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                        >
+                            <XMarkIcon className="w-5 h-5" />
+                        </button>
+                    </div>
+                    <div className="overflow-y-auto px-6 py-5 flex-1">
+                        {activeTab === 'profile' && <ProfileAccuracyContent stats={stats} />}
+                        {activeTab === 'duplicates' && <DuplicateEntriesContent stats={stats} siteMap={siteMap} regionMap={regionMap} />}
+                        {activeTab === 'attachment' && <AttachmentCoverageContent stats={stats} siteMap={siteMap} regionMap={regionMap} />}
+                    </div>
                 </div>
             </div>
         </div>,
@@ -630,6 +861,10 @@ function MasterfileInventory() {
     const user = JSON.parse(sessionStorage.getItem('user') || '{}');
     const role = (user.user_type || 'FSE').toString().trim().toUpperCase();
     const isFSE = role === 'FSE';
+    const isADM = role === 'ADM';
+    // Org-wide roles (ADM with All Cluster scope, and ROO) see every region/site
+    // regardless of a Region filter selection.
+    const isOrgWide = (role === 'ADM' && user.cluster_name === 'All Cluster') || role === 'ROO';
 
     const [allHardware, setAllHardware] = useState([]);
     const [allSites, setAllSites] = useState([]);
@@ -670,7 +905,31 @@ function MasterfileInventory() {
     const [viewDetailItem, setViewDetailItem] = useState(null);
     const [pulloutRequests, setPulloutRequests] = useState([]);
     const [accuracyModal, setAccuracyModal] = useState(null); // null | 'profile' | 'duplicates' | 'attachment'
+    const [qualityPopoverOpen, setQualityPopoverOpen] = useState(false);
+    const [showQualityHint, setShowQualityHint] = useState(false);
+    const qualityHintShownRef = useRef(false);
+    const qualityMenuRef = useRef(null);
     const [showReportModal, setShowReportModal] = useState(false);
+
+    // Close the Data Quality popover / auto-hint on outside click or Escape.
+    useEffect(() => {
+        if (!qualityPopoverOpen && !showQualityHint) return;
+        const handleClick = (e) => {
+            if (qualityMenuRef.current && !qualityMenuRef.current.contains(e.target)) {
+                setQualityPopoverOpen(false);
+                setShowQualityHint(false);
+            }
+        };
+        const handleKey = (e) => {
+            if (e.key === 'Escape') { setQualityPopoverOpen(false); setShowQualityHint(false); }
+        };
+        document.addEventListener('mousedown', handleClick);
+        document.addEventListener('keydown', handleKey);
+        return () => {
+            document.removeEventListener('mousedown', handleClick);
+            document.removeEventListener('keydown', handleKey);
+        };
+    }, [qualityPopoverOpen, showQualityHint]);
 
     const showToast = (message, type = 'error') => {
         setToast({ message, type });
@@ -963,8 +1222,52 @@ function MasterfileInventory() {
         };
     }, [sortedHardware, statusFilter, pulloutRequestMap, pulloutRequests.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
+    // Data Quality bell/popover summary — derived from accuracyStats, one row per check.
+    const qualityIssues = useMemo(() => {
+        if (!accuracyStats) return [];
+        const profileItem = {
+            key: 'profile',
+            label: 'Profile Accuracy',
+            pct: accuracyStats.profilePct,
+            detail: `${accuracyStats.fullyProfiled.toLocaleString()} of ${accuracyStats.total.toLocaleString()} fully profiled`,
+            severity: accuracyStats.profilePct >= 90 ? 'ok' : accuracyStats.profilePct >= 75 ? 'warn' : 'bad',
+        };
+        if (accuracyStats.isPullOut) {
+            return [profileItem, {
+                key: 'attachment',
+                label: 'Attachment Coverage',
+                pct: accuracyStats.attachPct,
+                detail: accuracyStats.noAttachment === 0
+                    ? 'All forms on file'
+                    : `${accuracyStats.noAttachment} missing form${accuracyStats.noAttachment !== 1 ? 's' : ''}`,
+                severity: accuracyStats.noAttachment === 0 ? 'ok' : 'warn',
+            }];
+        }
+        return [profileItem, {
+            key: 'duplicates',
+            label: 'Duplicate Entries',
+            pct: null,
+            detail: accuracyStats.totalDuplicates === 0
+                ? 'None found'
+                : `${accuracyStats.totalDuplicates} group${accuracyStats.totalDuplicates !== 1 ? 's' : ''} found`,
+            severity: accuracyStats.totalDuplicates === 0 ? 'ok' : 'bad',
+        }];
+    }, [accuracyStats]);
+
     const showRegionDropdown = availableRegions.length > 1;
     const isLoading = baseLoading || hardwareLoading;
+
+    // Auto-surface the Data Quality hint bubble once per visit to this page,
+    // as soon as the first load finishes — but only if something actually
+    // needs attention. A ref (not state) gates it so it never re-fires on
+    // subsequent filter changes within the same mount.
+    useEffect(() => {
+        if (qualityHintShownRef.current || isLoading || !accuracyStats) return;
+        qualityHintShownRef.current = true;
+        if (qualityIssues.some(i => i.severity !== 'ok')) {
+            setShowQualityHint(true);
+        }
+    }, [isLoading, accuracyStats, qualityIssues]);
 
     const selectClasses =
         'w-full px-4 py-2.5 text-sm rounded-xl border border-gray-300 dark:border-gray-600 ' +
@@ -1368,11 +1671,41 @@ function MasterfileInventory() {
 
     return (
         <div className="p-6 max-w-7xl mx-auto space-y-8">
-            <div>
-                <h1 className="text-2xl font-medium text-gray-900 dark:text-gray-100">Hardware Inventory</h1>
-                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                    View hardware by status
-                </p>
+            <div className="flex items-start justify-between gap-4">
+                <div>
+                    <h1 className="text-2xl font-medium text-gray-900 dark:text-gray-100">Hardware Inventory</h1>
+                    <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                        View hardware by status
+                    </p>
+                </div>
+
+                {!baseLoading && (
+                    <div ref={qualityMenuRef} className="relative">
+                        <DataQualityBell
+                            issues={qualityIssues}
+                            loading={isLoading || !accuracyStats}
+                            open={qualityPopoverOpen}
+                            onToggle={() => {
+                                setShowQualityHint(false);
+                                setQualityPopoverOpen(o => !o);
+                            }}
+                            onSelect={(key) => {
+                                setAccuracyModal(key);
+                                setQualityPopoverOpen(false);
+                            }}
+                        />
+                        {showQualityHint && (
+                            <QualityHintBubble
+                                issues={qualityIssues}
+                                onOpen={(key) => {
+                                    setAccuracyModal(key);
+                                    setShowQualityHint(false);
+                                }}
+                                onDismiss={() => setShowQualityHint(false)}
+                            />
+                        )}
+                    </div>
+                )}
             </div>
 
             {toast && (
@@ -1394,6 +1727,7 @@ function MasterfileInventory() {
                                     onChange={val => { setSelectedRegion(val); setSelectedSite(''); setCurrentPage(1); }}
                                     options={availableRegions.map(r => ({ value: String(r.region_id), label: r.region_name }))}
                                     placeholder="All regions"
+                                    isDisabled={isLoading}
                                 />
                             </div>
                         )}
@@ -1405,7 +1739,9 @@ function MasterfileInventory() {
                                 onChange={val => { setSelectedSite(val); setCurrentPage(1); }}
                                 options={filteredSites.map(s => ({ value: s.site_code, label: `${s.site_code} – ${s.site_name}` }))}
                                 placeholder="All sites"
-                                isDisabled={!selectedRegion && showRegionDropdown}
+                                // Org-wide roles (ADM/All Cluster, ROO) can browse every site without
+                                // picking a region first — everyone else needs a region selected.
+                                isDisabled={isLoading || (!selectedRegion && showRegionDropdown && !isOrgWide)}
                             />
                         </div>
 
@@ -1426,7 +1762,8 @@ function MasterfileInventory() {
                                 type="text"
                                 value={searchTerm}
                                 onChange={e => { setSearchTerm(e.target.value); setCurrentPage(1); }}
-                                className="w-full px-3 py-2 text-sm rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 transition-colors"
+                                disabled={isLoading}
+                                className="w-full px-3 py-2 text-sm rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                 placeholder="Asset, serial, type, brand, model, site…"
                             />
                         </div>
@@ -1434,223 +1771,17 @@ function MasterfileInventory() {
                 </div>
             )}
 
-            {/* ── Accuracy Report Cards ── */}
-            {!baseLoading && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {hardwareLoading ? (
-                        [...Array(2)].map((_, i) => (
-                            <div key={i} className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 px-5 py-4 flex flex-col gap-3">
-                                <div className="flex justify-between items-start">
-                                    <div className="space-y-1.5">
-                                        <div className="h-4 w-36 bg-gray-200 dark:bg-gray-700 rounded animate-pulse" />
-                                        <div className="h-3 w-52 bg-gray-100 dark:bg-gray-800 rounded animate-pulse" />
-                                    </div>
-                                    <div className="h-9 w-16 bg-gray-200 dark:bg-gray-700 rounded animate-pulse" />
-                                </div>
-                                <div className="h-2.5 w-full bg-gray-100 dark:bg-gray-800 rounded-full animate-pulse" />
-                            </div>
-                        ))
-                    ) : accuracyStats ? (
-                        !accuracyStats.isPullOut ? (
-                            <>
-                                <AccuracyCard
-                                    title="Profile Accuracy"
-                                    pct={accuracyStats.profilePct}
-                                    colorClass={
-                                        accuracyStats.profilePct >= 90 ? 'bg-emerald-500'
-                                        : accuracyStats.profilePct >= 75 ? 'bg-amber-400'
-                                        : 'bg-red-500'
-                                    }
-                                    hint={`${accuracyStats.fullyProfiled.toLocaleString()} of ${accuracyStats.total.toLocaleString()} fully profiled · click for field breakdown`}
-                                    onClick={() => setAccuracyModal('profile')}
-                                />
-                                <AccuracyCard
-                                    title="Duplicate Entries"
-                                    badge={
-                                        accuracyStats.totalDuplicates === 0
-                                            ? 'None found'
-                                            : `${accuracyStats.totalDuplicates} group${accuracyStats.totalDuplicates !== 1 ? 's' : ''}`
-                                    }
-                                    badgeClass={
-                                        accuracyStats.totalDuplicates === 0
-                                            ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400'
-                                            : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
-                                    }
-                                    hint="Duplicate asset or serial numbers among On Site hardware · click to review"
-                                    onClick={() => setAccuracyModal('duplicates')}
-                                />
-                            </>
-                        ) : (
-                            <>
-                                <AccuracyCard
-                                    title="Profile Accuracy"
-                                    pct={accuracyStats.profilePct}
-                                    colorClass={accuracyStats.profilePct >= 90 ? 'bg-emerald-500' : 'bg-amber-400'}
-                                    hint={`${accuracyStats.fullyProfiled.toLocaleString()} of ${accuracyStats.total.toLocaleString()} fully profiled · click for field breakdown`}
-                                    onClick={() => setAccuracyModal('profile')}
-                                />
-                                <AccuracyCard
-                                    title="Attachment Coverage"
-                                    pct={accuracyStats.attachPct}
-                                    colorClass={
-                                        accuracyStats.attachPct === null ? 'bg-gray-300'
-                                        : accuracyStats.attachPct >= 75 ? 'bg-emerald-500'
-                                        : 'bg-amber-400'
-                                    }
-                                    badge={`${accuracyStats.withAttachment} / ${accuracyStats.total} have a file`}
-                                    badgeClass="bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300"
-                                    hint="Pull-out forms on file · click to see hardware without attachment"
-                                    onClick={() => setAccuracyModal('attachment')}
-                                />
-                            </>
-                        )
-                    ) : null}
-                </div>
-            )}
-
-            {/* ── Accuracy detail modals ── */}
-            {accuracyStats && accuracyModal === 'profile' && (
-                <AccuracyModal title="Profile Accuracy — Field Breakdown" onClose={() => setAccuracyModal(null)}>
-                    <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-                        {accuracyStats.fullyProfiled.toLocaleString()} of {accuracyStats.total.toLocaleString()} records have asset number, serial number, brand, and model filled in.
-                    </p>
-                    <div className="space-y-3">
-                        {accuracyStats.fieldStats.map(f => (
-                            <FieldBar key={f.key} label={f.label} pct={f.pct} filled={f.filled} total={f.total} note={f.note} />
-                        ))}
-                    </div>
-                </AccuracyModal>
-            )}
-
-            {accuracyStats && accuracyModal === 'duplicates' && (
-                <AccuracyModal title="Duplicate Entries" onClose={() => setAccuracyModal(null)}>
-                    {accuracyStats.totalDuplicates === 0 ? (
-                        <p className="text-sm text-gray-500 dark:text-gray-400">No duplicate asset numbers or serial numbers detected among On Site hardware.</p>
-                    ) : (
-                        <div className="space-y-6">
-                            {accuracyStats.dupAssets.length > 0 && (
-                                <div>
-                                    <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
-                                        Asset Number · {accuracyStats.dupAssets.length} duplicate group{accuracyStats.dupAssets.length !== 1 ? 's' : ''}
-                                    </p>
-                                    <div className="space-y-2">
-                                        {accuracyStats.dupAssets.map(({ value, items }) => (
-                                            <div key={value} className="rounded-lg border border-red-100 dark:border-red-900/30 overflow-hidden">
-                                                <div className="bg-red-50 dark:bg-red-900/20 px-3 py-1.5 flex items-center gap-2">
-                                                    <span className="text-xs font-mono font-semibold text-red-700 dark:text-red-400">{value}</span>
-                                                    <span className="text-xs text-red-400 dark:text-red-500">· {items.length} entries</span>
-                                                </div>
-                                                <table className="w-full text-xs">
-                                                    <thead>
-                                                        <tr className="bg-gray-50 dark:bg-gray-800/50 border-b border-gray-100 dark:border-gray-800">
-                                                            <th className="px-3 py-1.5 text-left text-gray-500 dark:text-gray-400 font-medium">Type</th>
-                                                            <th className="px-3 py-1.5 text-left text-gray-500 dark:text-gray-400 font-medium">Brand / Model</th>
-                                                            <th className="px-3 py-1.5 text-left text-gray-500 dark:text-gray-400 font-medium">Site</th>
-                                                            <th className="px-3 py-1.5 text-left text-gray-500 dark:text-gray-400 font-medium">Region</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody>
-                                                        {items.map(h => {
-                                                            const site = siteMap?.[h.site_code];
-                                                            const regionName = site ? (regionMap?.[String(site.region_id)] || h.region_name) : h.region_name;
-                                                            return (
-                                                                <tr key={h.hw_id} className="border-b border-gray-50 dark:border-gray-800/50 last:border-0">
-                                                                    <td className="px-3 py-1.5 text-gray-700 dark:text-gray-300">{h.item_desc || '—'}</td>
-                                                                    <td className="px-3 py-1.5 text-gray-700 dark:text-gray-300">{[h.hw_brand_name, h.hw_model].filter(Boolean).join(' / ') || '—'}</td>
-                                                                    <td className="px-3 py-1.5 font-mono text-gray-700 dark:text-gray-300">{h.site_code || '—'}</td>
-                                                                    <td className="px-3 py-1.5 text-gray-700 dark:text-gray-300">{regionName || '—'}</td>
-                                                                </tr>
-                                                            );
-                                                        })}
-                                                    </tbody>
-                                                </table>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-                            {accuracyStats.dupSerials.length > 0 && (
-                                <div>
-                                    <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
-                                        Serial Number · {accuracyStats.dupSerials.length} duplicate group{accuracyStats.dupSerials.length !== 1 ? 's' : ''}
-                                    </p>
-                                    <div className="space-y-2">
-                                        {accuracyStats.dupSerials.map(({ value, items }) => (
-                                            <div key={value} className="rounded-lg border border-amber-100 dark:border-amber-900/30 overflow-hidden">
-                                                <div className="bg-amber-50 dark:bg-amber-900/20 px-3 py-1.5 flex items-center gap-2">
-                                                    <span className="text-xs font-mono font-semibold text-amber-700 dark:text-amber-400">{value}</span>
-                                                    <span className="text-xs text-amber-400 dark:text-amber-500">· {items.length} entries</span>
-                                                </div>
-                                                <table className="w-full text-xs">
-                                                    <thead>
-                                                        <tr className="bg-gray-50 dark:bg-gray-800/50 border-b border-gray-100 dark:border-gray-800">
-                                                            <th className="px-3 py-1.5 text-left text-gray-500 dark:text-gray-400 font-medium">Type</th>
-                                                            <th className="px-3 py-1.5 text-left text-gray-500 dark:text-gray-400 font-medium">Brand / Model</th>
-                                                            <th className="px-3 py-1.5 text-left text-gray-500 dark:text-gray-400 font-medium">Site</th>
-                                                            <th className="px-3 py-1.5 text-left text-gray-500 dark:text-gray-400 font-medium">Region</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody>
-                                                        {items.map(h => {
-                                                            const site = siteMap?.[h.site_code];
-                                                            const regionName = site ? (regionMap?.[String(site.region_id)] || h.region_name) : h.region_name;
-                                                            return (
-                                                                <tr key={h.hw_id} className="border-b border-gray-50 dark:border-gray-800/50 last:border-0">
-                                                                    <td className="px-3 py-1.5 text-gray-700 dark:text-gray-300">{h.item_desc || '—'}</td>
-                                                                    <td className="px-3 py-1.5 text-gray-700 dark:text-gray-300">{[h.hw_brand_name, h.hw_model].filter(Boolean).join(' / ') || '—'}</td>
-                                                                    <td className="px-3 py-1.5 font-mono text-gray-700 dark:text-gray-300">{h.site_code || '—'}</td>
-                                                                    <td className="px-3 py-1.5 text-gray-700 dark:text-gray-300">{regionName || '—'}</td>
-                                                                </tr>
-                                                            );
-                                                        })}
-                                                    </tbody>
-                                                </table>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    )}
-                </AccuracyModal>
-            )}
-
-            {accuracyStats && accuracyModal === 'attachment' && (
-                <AccuracyModal title="Attachment Coverage — Missing Forms" onClose={() => setAccuracyModal(null)}>
-                    {accuracyStats.noAttachment === 0 ? (
-                        <p className="text-sm text-emerald-600 dark:text-emerald-400">All pulled-out hardware has a pull-out form on file.</p>
-                    ) : (
-                        <div>
-                            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-                                {accuracyStats.noAttachment} pulled-out item{accuracyStats.noAttachment !== 1 ? 's have' : ' has'} no form on file.
-                            </p>
-                            <table className="w-full text-xs">
-                                <thead>
-                                    <tr className="bg-gray-50 dark:bg-gray-800/50 border-b border-gray-100 dark:border-gray-800">
-                                        <th className="px-3 py-2 text-left text-gray-500 dark:text-gray-400 font-medium">Asset</th>
-                                        <th className="px-3 py-2 text-left text-gray-500 dark:text-gray-400 font-medium">Type</th>
-                                        <th className="px-3 py-2 text-left text-gray-500 dark:text-gray-400 font-medium">Site</th>
-                                        <th className="px-3 py-2 text-left text-gray-500 dark:text-gray-400 font-medium">Region</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {accuracyStats.noAttachmentItems.map(h => {
-                                        const site = siteMap?.[h.site_code];
-                                        const regionName = site ? (regionMap?.[String(site.region_id)] || h.region_name) : h.region_name;
-                                        return (
-                                            <tr key={h.hw_id} className="border-b border-gray-50 dark:border-gray-800/50 last:border-0 hover:bg-gray-50 dark:hover:bg-gray-800/30">
-                                                <td className="px-3 py-2 font-mono text-gray-700 dark:text-gray-300">{h.hw_asset_num || '—'}</td>
-                                                <td className="px-3 py-2 text-gray-700 dark:text-gray-300">{h.item_desc || '—'}</td>
-                                                <td className="px-3 py-2 font-mono text-gray-700 dark:text-gray-300">{h.site_code || '—'}</td>
-                                                <td className="px-3 py-2 text-gray-700 dark:text-gray-300">{regionName || '—'}</td>
-                                            </tr>
-                                        );
-                                    })}
-                                </tbody>
-                            </table>
-                        </div>
-                    )}
-                </AccuracyModal>
+            {/* ── Data Quality detail modal (opened from the bell popover) ── */}
+            {accuracyStats && accuracyModal && (
+                <DataQualityModal
+                    stats={accuracyStats}
+                    tabs={accuracyStats.isPullOut ? ['profile', 'attachment'] : ['profile', 'duplicates']}
+                    activeTab={accuracyModal}
+                    onTabChange={setAccuracyModal}
+                    onClose={() => setAccuracyModal(null)}
+                    siteMap={siteMap}
+                    regionMap={regionMap}
+                />
             )}
 
             {baseLoading ? (
@@ -1702,7 +1833,7 @@ function MasterfileInventory() {
                         </div>
 
                         <div className="flex items-center gap-3 flex-wrap">
-                            {isFSE && selectedRows.size === 0 && (
+                            {(isFSE || isADM) && selectedRows.size === 0 && (
                                 <button
                                     onClick={() => {
                                         setEditHardware(null);

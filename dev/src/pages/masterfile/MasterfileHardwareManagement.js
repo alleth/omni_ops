@@ -1,7 +1,7 @@
 // src/pages/masterfile/MasterfileHardwareManagement.js
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowDownTrayIcon } from '@heroicons/react/24/outline';
+import { ArrowDownTrayIcon, BellAlertIcon, XMarkIcon } from '@heroicons/react/24/outline';
 import * as XLSX from 'xlsx';
 import { useApi } from '../../hooks/useApi';
 
@@ -126,16 +126,90 @@ function installedFacilities(row) {
     return out;
 }
 
+// ─── Antivirus meta (version, virus definition date, last verified) ──────────
+// Version, definition date, and a "last verified" stamp are stored together as
+// JSON in the single `hw_antivi_meta` column — one extra column instead of
+// three — so the existing `hw_antivi` column (product name) and everything
+// that already reads it are untouched.
+// Shape: {"version":"22.4.1","def_date":"2026-07-30","last_checked":"<ISO datetime>"}
+// `last_checked` is stamped automatically whenever this sub-view is saved —
+// that save *is* the "check" event, so there's no manual field for it.
+const ANTIVIRUS_STALE_DAYS = 90; // flag for re-verification once unchecked this long
+
+function parseAntiviMeta(raw) {
+    if (!raw) return { version: '', defDate: '', lastChecked: '' };
+    try {
+        const obj = JSON.parse(raw);
+        return {
+            version:     obj.version   || '',
+            defDate:     obj.def_date  || '',
+            lastChecked: obj.last_checked || '',
+        };
+    } catch {
+        return { version: '', defDate: '', lastChecked: '' };
+    }
+}
+
+function antiviLastCheckedInfo(raw) {
+    const { lastChecked } = parseAntiviMeta(raw);
+    const date = lastChecked ? new Date(lastChecked) : null;
+    if (!date || isNaN(date.getTime())) {
+        return { label: 'Never verified', cls: 'text-gray-400 dark:text-gray-500' };
+    }
+    const days = Math.floor((Date.now() - date.getTime()) / (1000 * 60 * 60 * 24));
+    const stale = days > ANTIVIRUS_STALE_DAYS;
+    const label = days <= 0 ? 'Verified today' : days === 1 ? 'Verified 1 day ago' : `Verified ${days} days ago`;
+    return { label, cls: stale ? 'text-amber-500 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400' };
+}
+
+// Resolves a field's value for display/completeness, special-casing the two
+// antivirus sub-fields that live inside hw_antivi_meta rather than as their
+// own DB columns.
+function getFieldValue(row, key) {
+    if (key === 'hw_antivi_version')  return parseAntiviMeta(row.hw_antivi_meta).version;
+    if (key === 'hw_antivi_def_date') return parseAntiviMeta(row.hw_antivi_meta).defDate;
+    return row[key];
+}
+
+// ─── Virus definition monitoring ──────────────────────────────────────────────
+// Distinct from antiviLastCheckedInfo() above: that one tracks when an FSE last
+// *audited* the record (last_checked). This tracks whether the recorded virus
+// definition itself is actually current (def_date) — the thing that should
+// trigger a "go update this machine's antivirus" notification.
+const VIRUS_DEF_STALE_DAYS = 30; // tighter than the 90-day audit window — defs go stale fast
+
+function virusDefStatus(row) {
+    if (!row.hw_antivi || isPlaceholderVal(row.hw_antivi)) {
+        return { severity: 'missing', label: 'No antivirus recorded', days: null };
+    }
+    const { defDate } = parseAntiviMeta(row.hw_antivi_meta);
+    const date = defDate ? new Date(defDate) : null;
+    if (!date || isNaN(date.getTime())) {
+        return { severity: 'unknown', label: 'No definition date on file', days: null };
+    }
+    const days = Math.floor((Date.now() - date.getTime()) / (1000 * 60 * 60 * 24));
+    if (days > VIRUS_DEF_STALE_DAYS) {
+        return { severity: 'stale', label: `Definition ${days} days old`, days };
+    }
+    return { severity: 'ok', label: `Definition ${days} day${days === 1 ? '' : 's'} old`, days };
+}
+
 // ─── Shared styles ─────────────────────────────────────────────────────────
 const inputCls   = 'w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-all';
 const selectCls  = `${inputCls} appearance-none pr-8`;
 const sectionHdr = 'text-xs font-semibold uppercase tracking-widest text-gray-400 dark:text-gray-500 mb-3 mt-1';
 const labelCls   = 'block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1';
 const roValCls   = 'py-1 text-sm text-gray-800 dark:text-gray-100';
+const thCls      = 'px-4 py-2.5 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 whitespace-nowrap';
+const tdCls      = 'px-4 py-3 text-sm text-gray-800 dark:text-gray-200 whitespace-nowrap';
 
 // ─── CPU sub-view options ─────────────────────────────────────────────────────
+// OS Type/.NET and Antivirus used to share one "OS Type & Antivirus" sub-view;
+// split so Antivirus can carry its own version/definition-date/last-verified
+// fields without crowding the OS/.NET section.
 const CPU_VIEWS = [
-    { value: 'os_antivirus',    label: 'OS Type & Antivirus' },
+    { value: 'os_dotnet',       label: 'OS Type & .NET Framework' },
+    { value: 'antivirus',       label: 'Antivirus Updates' },
     { value: 'core_facilities', label: 'Core Build & Facilities' },
     { value: 'hostname_ip_mac', label: 'Hostname, IP & MAC' },
     { value: 'workstep_user',   label: 'Workstep & User Assignment' },
@@ -144,10 +218,14 @@ const CPU_VIEWS = [
 
 // ─── Config completeness fields — scoped per CPU sub-view ─────────────────────
 const CPU_VIEW_FIELDS = {
-    os_antivirus:    [
-        { key: 'os_type',   label: 'OS Type' },
-        { key: 'hw_antivi', label: 'Antivirus' },
-        { key: 'dotnet',    label: '.NET' },
+    os_dotnet:       [
+        { key: 'os_type', label: 'OS Type' },
+        { key: 'dotnet',  label: '.NET Framework' },
+    ],
+    antivirus:       [
+        { key: 'hw_antivi',          label: 'Antivirus Product' },
+        { key: 'hw_antivi_version',  label: 'Version' },
+        { key: 'hw_antivi_def_date', label: 'Virus Definition Date' },
     ],
     core_facilities: [
         { key: 'core_buid', label: 'Core Build' },
@@ -178,17 +256,22 @@ const CPU_VIEW_FIELDS = {
 
 // ─── Server sub-view options ──────────────────────────────────────────────────
 const SERVER_VIEWS = [
-    { value: 'os_av_net',       label: 'OS Type, Antivirus & .NET' },
+    { value: 'os_dotnet',       label: 'OS Type & .NET Framework' },
+    { value: 'antivirus',       label: 'Antivirus Updates' },
     { value: 'hostname_ip_mac', label: 'Hostname, IP & MAC' },
     { value: 'mem_hdd',         label: 'Memory, HDD Health & Age' },
 ];
 
 // ─── Config completeness fields — SERVER (scoped per sub-view) and SWITCH ─────
 const SERVER_VIEW_FIELDS = {
-    os_av_net: [
-        { key: 'os_type',   label: 'OS Type' },
-        { key: 'hw_antivi', label: 'Antivirus' },
-        { key: 'dotnet',    label: '.NET' },
+    os_dotnet: [
+        { key: 'os_type', label: 'OS Type' },
+        { key: 'dotnet',  label: '.NET Framework' },
+    ],
+    antivirus: [
+        { key: 'hw_antivi',          label: 'Antivirus Product' },
+        { key: 'hw_antivi_version',  label: 'Version' },
+        { key: 'hw_antivi_def_date', label: 'Virus Definition Date' },
     ],
     hostname_ip_mac: [
         { key: 'hw_host_name', label: 'Hostname' },
@@ -203,7 +286,8 @@ const SERVER_VIEW_FIELDS = {
 };
 
 const SERVER_VIEW_SAVE_FIELDS = {
-    os_av_net:       ['os_type', 'hw_antivi', 'dotnet'],
+    os_dotnet:       ['os_type', 'dotnet'],
+    antivirus:       ['hw_antivi', 'hw_antivi_meta'],
     hostname_ip_mac: ['hw_host_name', 'hw_ip_add', 'hw_mac_add'],
     mem_hdd:         ['hw_date_acq', 'hw_acq_val', 'hw_memory', 'hdd_capacity', 'hdd_free_space'],
 };
@@ -220,7 +304,8 @@ const CONFIG_FIELDS = {
 // Fields sent to the API per CPU sub-view — prevents empty non-visible fields from
 // triggering CakePHP _empty validation errors
 const CPU_VIEW_SAVE_FIELDS = {
-    os_antivirus:    ['os_type', 'hw_antivi', 'dotnet'],
+    os_dotnet:       ['os_type', 'dotnet'],
+    antivirus:       ['hw_antivi', 'hw_antivi_meta'],
     core_facilities: ['core_buid', 'rsu_fac', 'mv_dto', 'mv_maint', 'ims_aiu', 'dl_dto', 'dl_maint'],
     hostname_ip_mac: ['hw_host_name', 'hw_ip_add', 'hw_mac_add'],
     workstep_user:   ['hw_user_name', 'hw_primary_role'],
@@ -241,9 +326,9 @@ const HDD_CAP_OPTIONS    = ['120GB', '128GB', '160GB', '240GB', '256GB', '320GB'
 
 function ConfigCompletionCard({ rows, category, cpuView, serverView }) {
     const fields = category === 'CPU'
-        ? (CPU_VIEW_FIELDS[cpuView]    || CPU_VIEW_FIELDS.os_antivirus)
+        ? (CPU_VIEW_FIELDS[cpuView]    || CPU_VIEW_FIELDS.os_dotnet)
         : category === 'SERVER'
-        ? (SERVER_VIEW_FIELDS[serverView] || SERVER_VIEW_FIELDS.os_av_net)
+        ? (SERVER_VIEW_FIELDS[serverView] || SERVER_VIEW_FIELDS.os_dotnet)
         : CONFIG_FIELDS[category];
 
     if (!fields || rows.length === 0) return null;
@@ -256,11 +341,11 @@ function ConfigCompletionCard({ rows, category, cpuView, serverView }) {
     const fieldStats = fields.map(f => {
         if (f.perSite) {
             const filled = sites.filter(site =>
-                rows.some(r => r.site_code === site && isFieldFilled(f.key, r[f.key]))
+                rows.some(r => r.site_code === site && isFieldFilled(f.key, getFieldValue(r, f.key)))
             ).length;
             return { ...f, filled, total: siteTotal, pct: siteTotal > 0 ? Math.round((filled / siteTotal) * 100) : 0, unit: 'sites' };
         }
-        const filled = rows.filter(r => isFieldFilled(f.key, r[f.key])).length;
+        const filled = rows.filter(r => isFieldFilled(f.key, getFieldValue(r, f.key))).length;
         return { ...f, filled, total: unitTotal, pct: Math.round((filled / unitTotal) * 100), unit: 'units' };
     });
     const overallPct = Math.round(fieldStats.reduce((s, f) => s + f.pct, 0) / fieldStats.length);
@@ -377,6 +462,49 @@ function CheckField({ label, name, value, onChange }) {
     );
 }
 
+// ─── Antivirus Updates section — shared by the CPU and Server edit forms ──────
+// Product + Version + Virus Definition Date are all editable; "Last Verified"
+// is read-only and reflects the persisted hw_antivi_meta (i.e. what happened
+// on the last Save), not a live preview of "now" before the user has saved.
+function AntivirusFields({ hw, form, handleChange }) {
+    const info = antiviLastCheckedInfo(hw.hw_antivi_meta);
+    return (
+        <>
+            <div className="border-t border-gray-100 dark:border-gray-800" />
+            <div>
+                <p className={sectionHdr}>Antivirus Updates</p>
+                <div className="grid grid-cols-2 gap-4">
+                    <Field label="Antivirus Product">
+                        <SelectInput name="hw_antivi" value={form.hw_antivi || ''} onChange={handleChange}>
+                            <option value="">— Select antivirus —</option>
+                            {ANTIVIRUS_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                        </SelectInput>
+                    </Field>
+                    <Field label="Version">
+                        <input
+                            type="text" name="hw_antivi_version" value={form.hw_antivi_version || ''}
+                            onChange={handleChange} className={inputCls} placeholder="e.g. 22.4.1"
+                        />
+                    </Field>
+                    <Field label="Virus Definition Date">
+                        <input
+                            type="date" name="hw_antivi_def_date" value={form.hw_antivi_def_date || ''}
+                            onChange={handleChange} className={inputCls}
+                        />
+                    </Field>
+                    <div>
+                        <p className={labelCls}>Last Verified (auto)</p>
+                        <p className={`${roValCls} font-medium ${info.cls}`}>{info.label}</p>
+                    </div>
+                </div>
+                <p className="text-xs text-gray-400 dark:text-gray-500 mt-3">
+                    "Last Verified" is stamped automatically to today whenever you save changes here — there's nothing to set manually.
+                </p>
+            </div>
+        </>
+    );
+}
+
 // ─── Chevron icon for filter selects ─────────────────────────────────────────
 const ChevronDown = () => (
     <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2.5 text-gray-400">
@@ -385,6 +513,260 @@ const ChevronDown = () => (
         </svg>
     </span>
 );
+
+// ─── Virus Definition Monitor ──────────────────────────────────────────────────
+// Fleet-wide notification for antivirus definitions that need updating — the
+// same bell/popover/auto-hint language used for "Data Quality" on Hardware
+// Inventory, kept consistent here. Scoped to every CPU/Server unit the user
+// can see (baseHardware), independent of whatever category/sub-view/filters
+// happen to be active in the table below — this monitors the fleet, not
+// "whatever you're currently browsing".
+
+function AlertCountRow({ dot, label, count }) {
+    return (
+        <div className="flex items-center gap-3 px-4 py-2">
+            <span className={`w-2 h-2 rounded-full shrink-0 ${dot}`} />
+            <span className="flex-1 text-sm text-gray-700 dark:text-gray-300">{label}</span>
+            <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">{count}</span>
+        </div>
+    );
+}
+
+// ── Bell button + summary popover (upper-right corner) ──
+function AntivirusAlertBell({ alerts, open, onToggle, onViewAll }) {
+    if (alerts.length === 0) return null;
+    const counts = alerts.reduce((acc, a) => {
+        acc[a.status.severity] = (acc[a.status.severity] || 0) + 1;
+        return acc;
+    }, {});
+
+    return (
+        <div className="relative">
+            <button
+                type="button"
+                onClick={onToggle}
+                aria-label="Antivirus definition alerts"
+                title="Antivirus definition alerts"
+                className="relative p-2.5 rounded-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-500 dark:text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors shadow-sm"
+            >
+                <BellAlertIcon className="w-5 h-5" />
+                <span className="absolute -top-1 -right-1 flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold leading-none">
+                    {alerts.length > 99 ? '99+' : alerts.length}
+                </span>
+            </button>
+
+            {open && (
+                <div className="absolute right-0 top-full mt-2 w-80 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 shadow-2xl z-50 overflow-hidden">
+                    <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-800">
+                        <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">Antivirus Definitions</p>
+                        <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                            {alerts.length} unit{alerts.length !== 1 ? 's' : ''} in your scope need attention
+                        </p>
+                    </div>
+                    <div className="py-1">
+                        {counts.missing > 0 && <AlertCountRow dot="bg-red-500"   label="No antivirus recorded" count={counts.missing} />}
+                        {counts.stale   > 0 && <AlertCountRow dot="bg-amber-400" label={`Definition over ${VIRUS_DEF_STALE_DAYS} days old`} count={counts.stale} />}
+                        {counts.unknown > 0 && <AlertCountRow dot="bg-amber-400" label="No definition date on file" count={counts.unknown} />}
+                    </div>
+                    <div className="px-4 py-3 border-t border-gray-100 dark:border-gray-800">
+                        <button
+                            onClick={onViewAll}
+                            className="w-full text-center px-3 py-1.5 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors"
+                        >
+                            View All
+                        </button>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
+// ── Auto-appearing hint bubble — shown once per visit if anything needs attention ──
+function AntivirusAlertHint({ alerts, onOpen, onDismiss }) {
+    const [phase, setPhase] = useState('enter'); // 'enter' | 'visible' | 'leave'
+
+    useEffect(() => {
+        const toVisible = setTimeout(() => setPhase('visible'), 20);
+        const toLeave   = setTimeout(() => setPhase('leave'), 4500);
+        const toGone    = setTimeout(onDismiss, 4850);
+        return () => { clearTimeout(toVisible); clearTimeout(toLeave); clearTimeout(toGone); };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    if (alerts.length === 0) return null;
+
+    return (
+        <div
+            className={`absolute right-0 top-full mt-2 w-72 z-40 origin-top-right transition-all duration-300 ease-out ${
+                phase === 'visible' ? 'opacity-100 scale-100 translate-y-0' : 'opacity-0 scale-90 -translate-y-1'
+            }`}
+        >
+            <div className="absolute -top-1.5 right-4 w-3 h-3 bg-white dark:bg-gray-900 border-t border-l border-amber-200 dark:border-amber-800/60 rotate-45" />
+            <div
+                role="button"
+                tabIndex={0}
+                onClick={onOpen}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onOpen(); }}
+                className="relative w-full text-left bg-white dark:bg-gray-900 border border-amber-200 dark:border-amber-800/60 rounded-xl shadow-xl px-4 py-3 flex items-start gap-2.5 cursor-pointer hover:border-amber-300 dark:hover:border-amber-700 hover:shadow-2xl transition-all"
+            >
+                <span className="mt-1 w-2 h-2 rounded-full bg-red-500 shrink-0 animate-pulse" />
+                <span className="min-w-0">
+                    <span className="block text-sm font-semibold text-gray-800 dark:text-gray-100">
+                        {alerts.length} unit{alerts.length !== 1 ? 's' : ''} need antivirus updates
+                    </span>
+                    <span className="block text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">
+                        Outdated or missing virus definitions · tap to review
+                    </span>
+                </span>
+                <button
+                    onClick={(e) => { e.stopPropagation(); onDismiss(); }}
+                    className="ml-auto -mr-1 -mt-1 p-1 rounded-full text-gray-300 hover:text-gray-500 dark:text-gray-600 dark:hover:text-gray-300 shrink-0"
+                    aria-label="Dismiss"
+                >
+                    <XMarkIcon className="w-3.5 h-3.5" />
+                </button>
+            </div>
+        </div>
+    );
+}
+
+// ── Full list — click a row to jump straight into that unit's Antivirus Updates form ──
+const AV_ALERTS_PAGE_SIZE = 50;
+
+function AntivirusAlertsModal({ alerts, siteMap, regionMap, onClose, onSelect }) {
+    const [search, setSearch] = useState('');
+    const [page,   setPage]   = useState(0);
+
+    const sorted = useMemo(() => {
+        const rank = { missing: 0, stale: 1, unknown: 2 };
+        return [...alerts].sort((a, b) => {
+            const r = rank[a.status.severity] - rank[b.status.severity];
+            return r !== 0 ? r : (b.status.days || 0) - (a.status.days || 0);
+        });
+    }, [alerts]);
+
+    // This list can easily run into the thousands right after this feature
+    // ships — nobody has a definition date on file yet — so it needs its own
+    // search + pagination rather than rendering every row at once.
+    const filtered = useMemo(() => {
+        const term = search.trim().toLowerCase();
+        if (!term) return sorted;
+        return sorted.filter(({ row }) => {
+            const site = siteMap[row.site_code] || {};
+            return [row.hw_asset_num, row.hw_serial_num, row.site_code, site.site_name, row.hw_antivi]
+                .some(v => (v || '').toLowerCase().includes(term));
+        });
+    }, [sorted, search, siteMap]);
+
+    const totalPages = Math.max(1, Math.ceil(filtered.length / AV_ALERTS_PAGE_SIZE));
+    const pageSafe    = Math.min(page, totalPages - 1);
+    const paged        = filtered.slice(pageSafe * AV_ALERTS_PAGE_SIZE, (pageSafe + 1) * AV_ALERTS_PAGE_SIZE);
+
+    return createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
+            <div
+                className="relative w-full max-w-3xl rounded-2xl shadow-2xl ring-1 ring-gray-200/70 dark:ring-gray-700/50 bg-white dark:bg-gray-900 flex flex-col max-h-[85vh]"
+                onClick={e => e.stopPropagation()}
+            >
+                <div className="flex items-start justify-between px-6 pt-5 pb-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+                    <div>
+                        <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">Antivirus Definitions Needing Attention</h2>
+                        <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                            {alerts.length} unit{alerts.length !== 1 ? 's' : ''} across CPU/PC &amp; Server hardware in your scope · click a row to fix it
+                        </p>
+                    </div>
+                    <button
+                        onClick={onClose}
+                        className="p-1.5 rounded-full text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                    >
+                        <XMarkIcon className="w-5 h-5" />
+                    </button>
+                </div>
+                <div className="px-6 pt-3 flex-shrink-0">
+                    <input
+                        value={search}
+                        onChange={e => { setSearch(e.target.value); setPage(0); }}
+                        placeholder="Search asset, serial, site, antivirus…"
+                        className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 dark:text-gray-200 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                    />
+                </div>
+                <div className="overflow-y-auto flex-1 mt-3">
+                    <table className="min-w-full">
+                        <thead className="bg-gray-50 dark:bg-gray-800/60 sticky top-0">
+                            <tr>
+                                <th className={thCls}>Asset #</th>
+                                <th className={thCls}>Brand / Model</th>
+                                <th className={thCls}>Site</th>
+                                <th className={thCls}>Region</th>
+                                <th className={thCls}>Antivirus</th>
+                                <th className={thCls}>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                            {paged.length === 0 ? (
+                                <tr>
+                                    <td colSpan={6} className="px-4 py-10 text-center text-sm text-gray-400 dark:text-gray-500">
+                                        No matching units.
+                                    </td>
+                                </tr>
+                            ) : paged.map(({ row, status }) => {
+                                const site = siteMap[row.site_code] || {};
+                                const regionName = regionMap[String(site.region_id || row.region_name)] || row.region_name;
+                                return (
+                                    <tr
+                                        key={row.hw_id}
+                                        onClick={() => onSelect(row)}
+                                        className="cursor-pointer hover:bg-indigo-50 dark:hover:bg-indigo-950/20 transition-colors"
+                                    >
+                                        <td className={`${tdCls} font-medium text-indigo-600 dark:text-indigo-400`}>{row.hw_asset_num || '—'}</td>
+                                        <td className={tdCls}>{row.hw_brand_name || '—'} {row.hw_model || ''}</td>
+                                        <td className={tdCls}>{row.site_code || '—'}</td>
+                                        <td className={tdCls}>{regionName || '—'}</td>
+                                        <td className={`${tdCls} text-xs`}>{row.hw_antivi || <span className="text-gray-300 dark:text-gray-600">—</span>}</td>
+                                        <td className={tdCls}>
+                                            <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
+                                                status.severity === 'missing'
+                                                    ? 'bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400'
+                                                    : 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400'
+                                            }`}>
+                                                {status.label}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                </div>
+                {filtered.length > 0 && (
+                    <div className="flex items-center justify-between px-6 py-3 border-t border-gray-100 dark:border-gray-800 flex-shrink-0">
+                        <span className="text-xs text-gray-400 dark:text-gray-500">
+                            {filtered.length.toLocaleString()} unit{filtered.length !== 1 ? 's' : ''} &middot; page {pageSafe + 1} of {totalPages}
+                        </span>
+                        <div className="flex gap-2">
+                            <button
+                                onClick={() => setPage(p => Math.max(0, p - 1))}
+                                disabled={pageSafe === 0}
+                                className="px-3 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                            >
+                                Previous
+                            </button>
+                            <button
+                                onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
+                                disabled={pageSafe >= totalPages - 1}
+                                className="px-3 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                            >
+                                Next
+                            </button>
+                        </div>
+                    </div>
+                )}
+            </div>
+        </div>,
+        getModalRoot()
+    );
+}
 
 // ─── Config Modal ─────────────────────────────────────────────────────────────
 function ConfigModal({ hw, allHardware = [], siteMap, regionMap, cpuView, serverView, onClose, onSaved, readOnly = false }) {
@@ -397,6 +779,12 @@ function ConfigModal({ hw, allHardware = [], siteMap, regionMap, cpuView, server
         ['hw_host_name', 'hw_ip_add', 'hw_mac_add', 'hw_user_name', 'hw_primary_role', 'core_buid'].forEach(k => {
             if (isPlaceholderVal(f[k])) f[k] = '';
         });
+        // Antivirus version/def date live inside hw_antivi_meta (JSON) — surface
+        // them as their own editable form fields; buildPayload re-combines them
+        // (plus an auto "last checked" stamp) back into that one column on save.
+        const meta = parseAntiviMeta(hw.hw_antivi_meta);
+        f.hw_antivi_version  = meta.version;
+        f.hw_antivi_def_date = meta.defDate;
         return f;
     });
     const [saveError, setSaveError] = useState(null);
@@ -421,6 +809,17 @@ function ConfigModal({ hw, allHardware = [], siteMap, regionMap, cpuView, server
     const buildPayload = (keys) => {
         const p = { hw_id: form.hw_id };
         keys.forEach(f => {
+            if (f === 'hw_antivi_meta') {
+                // Recombine the transient version/def-date fields into the JSON
+                // blob, stamping "last checked" as now — saving this sub-view
+                // *is* the check event, so the timestamp is never hand-entered.
+                const version = (form.hw_antivi_version  || '').trim();
+                const defDate = (form.hw_antivi_def_date || '').trim();
+                if (version || defDate) {
+                    p[f] = JSON.stringify({ version, def_date: defDate, last_checked: new Date().toISOString() });
+                }
+                return;
+            }
             const v = form[f];
             if (BOOL_SAVE_FIELDS.has(f)) {
                 // Boolean columns: always include, normalise to '0' / '1'
@@ -477,7 +876,10 @@ function ConfigModal({ hw, allHardware = [], siteMap, regionMap, cpuView, server
         const res = await postData('/api/hw-tbl/update.json', payload);
         if (res?.success) {
             setSaved(true);
-            onSaved({ ...form });
+            // Merge `payload` (not just `form`) so the freshly-built hw_antivi_meta
+            // JSON — including the new "last checked" stamp — shows immediately
+            // instead of only after a refetch.
+            onSaved({ ...form, ...payload });
         } else {
             setSaveError(res?.message || res?.error || 'Failed to save. Please try again.');
         }
@@ -559,8 +961,8 @@ function ConfigModal({ hw, allHardware = [], siteMap, regionMap, cpuView, server
                     {/* ── CPU: only show the section matching the active sub-view ── */}
                     {isCpu ? (
                         <>
-                            {/* OS Type & Antivirus */}
-                            {cpuView === 'os_antivirus' && (
+                            {/* OS Type & .NET Framework */}
+                            {cpuView === 'os_dotnet' && (
                                 <>
                                     <div className="border-t border-gray-100 dark:border-gray-800" />
                                     <div>
@@ -572,20 +974,6 @@ function ConfigModal({ hw, allHardware = [], siteMap, regionMap, cpuView, server
                                                     {OS_TYPE_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
                                                 </SelectInput>
                                             </Field>
-                                            <Field label="Antivirus">
-                                                <SelectInput name="hw_antivi" value={form.hw_antivi || ''} onChange={handleChange}>
-                                                    <option value="">— Select antivirus —</option>
-                                                    {ANTIVIRUS_OPTIONS.filter(o => o).map(o => (
-                                                        <option key={o} value={o}>{o}</option>
-                                                    ))}
-                                                </SelectInput>
-                                            </Field>
-                                        </div>
-                                    </div>
-                                    <div className="border-t border-gray-100 dark:border-gray-800" />
-                                    <div>
-                                        <p className={sectionHdr}>Software</p>
-                                        <div className="grid grid-cols-2 gap-4">
                                             <Field label=".NET Framework Version">
                                                 <SelectInput name="dotnet" value={form.dotnet || ''} onChange={handleChange}>
                                                     <option value="">— Select version —</option>
@@ -595,6 +983,11 @@ function ConfigModal({ hw, allHardware = [], siteMap, regionMap, cpuView, server
                                         </div>
                                     </div>
                                 </>
+                            )}
+
+                            {/* Antivirus Updates */}
+                            {cpuView === 'antivirus' && (
+                                <AntivirusFields hw={hw} form={form} handleChange={handleChange} />
                             )}
 
                             {/* Core Build & Facilities */}
@@ -817,7 +1210,7 @@ function ConfigModal({ hw, allHardware = [], siteMap, regionMap, cpuView, server
                                 </>
                             )}
 
-                            {hasSystemFields && serverView === 'os_av_net' && (
+                            {hasSystemFields && serverView === 'os_dotnet' && (
                                 <>
                                     <div className="border-t border-gray-100 dark:border-gray-800" />
                                     <div>
@@ -829,18 +1222,6 @@ function ConfigModal({ hw, allHardware = [], siteMap, regionMap, cpuView, server
                                                     {OS_SERVER_TYPE_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
                                                 </SelectInput>
                                             </Field>
-                                            <Field label="Antivirus">
-                                                <SelectInput name="hw_antivi" value={form.hw_antivi || ''} onChange={handleChange}>
-                                                    <option value="">— Select antivirus —</option>
-                                                    {ANTIVIRUS_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-                                                </SelectInput>
-                                            </Field>
-                                        </div>
-                                    </div>
-                                    <div className="border-t border-gray-100 dark:border-gray-800" />
-                                    <div>
-                                        <p className={sectionHdr}>Software</p>
-                                        <div className="grid grid-cols-2 gap-4">
                                             <Field label=".NET Framework Version">
                                                 <SelectInput name="dotnet" value={form.dotnet || ''} onChange={handleChange}>
                                                     <option value="">— Select version —</option>
@@ -850,6 +1231,10 @@ function ConfigModal({ hw, allHardware = [], siteMap, regionMap, cpuView, server
                                         </div>
                                     </div>
                                 </>
+                            )}
+
+                            {hasSystemFields && serverView === 'antivirus' && (
+                                <AntivirusFields hw={hw} form={form} handleChange={handleChange} />
                             )}
 
                             {hasSystemFields && serverView === 'mem_hdd' && (
@@ -923,8 +1308,8 @@ function MasterfileHardwareManagement() {
 
     const [search,           setSearch]           = useState('');
     const [filterHwCategory, setFilterHwCategory] = useState('');
-    const [cpuView,          setCpuView]          = useState('os_antivirus');
-    const [serverView,       setServerView]       = useState('os_av_net');
+    const [cpuView,          setCpuView]          = useState('os_dotnet');
+    const [serverView,       setServerView]       = useState('os_dotnet');
     const [filterRegion,     setFilterRegion]     = useState('');
     const [filterSite,       setFilterSite]       = useState('');
     const [currentPage,      setCurrentPage]      = useState(0);
@@ -932,6 +1317,13 @@ function MasterfileHardwareManagement() {
     const [selected,         setSelected]         = useState(null);
     const [allRegions,       setAllRegions]       = useState([]);
     const [showReportModal,  setShowReportModal]  = useState(false);
+
+    // ── Virus definition monitor: bell popover, auto-hint, full list modal ──
+    const [avPopoverOpen, setAvPopoverOpen] = useState(false);
+    const [showAvHint,    setShowAvHint]    = useState(false);
+    const [showAvModal,   setShowAvModal]   = useState(false);
+    const avMenuRef      = useRef(null);
+    const avHintShownRef = useRef(false);
 
     // ── Role detection ─────────────────────────────────────────────────────
     const user = useMemo(() => { try { return JSON.parse(sessionStorage.getItem('user') || '{}'); } catch { return {}; } }, []);
@@ -970,6 +1362,62 @@ function MasterfileHardwareManagement() {
         const names = allowedRegionIds.map(id => regionMap[id]).filter(Boolean);
         return `Region: ${names.join(', ') || '—'}`;
     }, [role, user, allowedRegionIds, regionMap]);
+
+    // Every CPU/Server unit in scope whose antivirus definition is missing, has no
+    // recorded date, or is older than VIRUS_DEF_STALE_DAYS — independent of the
+    // category/sub-view filters below, since this is a fleet-wide monitor.
+    const avAlerts = useMemo(() => {
+        return baseHardware
+            .filter(h => isCpuCategory(h.item_desc) || isServerCategory(h.item_desc))
+            .map(row => ({ row, status: virusDefStatus(row) }))
+            .filter(a => a.status.severity !== 'ok');
+    }, [baseHardware]);
+
+    // Auto-surface the hint bubble once per visit to this page, as soon as the
+    // first load finishes — mirrors the Data Quality hint on Hardware Inventory.
+    useEffect(() => {
+        if (avHintShownRef.current || loading) return;
+        avHintShownRef.current = true;
+        if (avAlerts.length > 0) setShowAvHint(true);
+    }, [loading, avAlerts]);
+
+    // Close the bell popover / auto-hint on outside click or Escape.
+    useEffect(() => {
+        if (!avPopoverOpen && !showAvHint) return;
+        const handleClick = (e) => {
+            if (avMenuRef.current && !avMenuRef.current.contains(e.target)) {
+                setAvPopoverOpen(false);
+                setShowAvHint(false);
+            }
+        };
+        const handleKey = (e) => {
+            if (e.key === 'Escape') { setAvPopoverOpen(false); setShowAvHint(false); }
+        };
+        document.addEventListener('mousedown', handleClick);
+        document.addEventListener('keydown', handleKey);
+        return () => {
+            document.removeEventListener('mousedown', handleClick);
+            document.removeEventListener('keydown', handleKey);
+        };
+    }, [avPopoverOpen, showAvHint]);
+
+    // Jump straight into a flagged unit's Antivirus Updates form — also lines
+    // up the background table's category/sub-view so it matches once the
+    // modal closes, instead of leaving it on whatever was selected before.
+    const openAvAlert = (row) => {
+        if (isCpuCategory(row.item_desc)) {
+            setFilterHwCategory('CPU');
+            setCpuView('antivirus');
+        } else if (isServerCategory(row.item_desc)) {
+            setFilterHwCategory('SERVER');
+            setServerView('antivirus');
+        }
+        setCurrentPage(0);
+        setShowAvModal(false);
+        setAvPopoverOpen(false);
+        setShowAvHint(false);
+        setSelected(row);
+    };
 
     useEffect(() => {
         if (didLoad.current) return;
@@ -1028,14 +1476,16 @@ function MasterfileHardwareManagement() {
     const searchPlaceholder = useMemo(() => {
         if (!filterHwCategory) return 'Search asset, serial, brand, model, site…';
         if (filterHwCategory === 'CPU') {
-            if (cpuView === 'os_antivirus')    return 'Search asset, serial, site, OS type, antivirus, .NET…';
+            if (cpuView === 'os_dotnet')       return 'Search asset, serial, site, OS type, .NET…';
+            if (cpuView === 'antivirus')       return 'Search asset, serial, site, antivirus, version…';
             if (cpuView === 'core_facilities') return 'Search asset, serial, site, core build, facilities (IMS-AIU, MV-MAINT…)…';
             if (cpuView === 'hostname_ip_mac') return 'Search asset, serial, site, hostname, IP, MAC…';
             if (cpuView === 'workstep_user')   return 'Search asset, serial, site, user, primary role…';
             if (cpuView === 'hdd_age')         return 'Search asset, serial, site, memory, HDD capacity…';
         }
         if (filterHwCategory === 'SERVER') {
-            if (serverView === 'os_av_net')       return 'Search asset, serial, site, OS type, antivirus, .NET…';
+            if (serverView === 'os_dotnet')       return 'Search asset, serial, site, OS type, .NET…';
+            if (serverView === 'antivirus')       return 'Search asset, serial, site, antivirus, version…';
             if (serverView === 'hostname_ip_mac') return 'Search asset, serial, site, hostname, IP, MAC…';
             if (serverView === 'mem_hdd')         return 'Search asset, serial, site, memory, HDD capacity…';
         }
@@ -1058,16 +1508,24 @@ function MasterfileHardwareManagement() {
                 if (s('hw_asset_num') || s('hw_serial_num') || s('hw_brand_name') || s('hw_model') ||
                     s('site_code')    || (site?.site_name || '').toLowerCase().includes(term)) return true;
 
+                // Version/def-date live inside hw_antivi_meta (JSON), not their own columns.
+                const matchesAntivirus = () => {
+                    const meta = parseAntiviMeta(h.hw_antivi_meta);
+                    return s('hw_antivi') || meta.version.toLowerCase().includes(term) || meta.defDate.toLowerCase().includes(term);
+                };
+
                 // View-specific fields
                 if (filterHwCategory === 'CPU') {
-                    if (cpuView === 'os_antivirus')    return s('os_type') || s('hw_antivi') || s('dotnet');
+                    if (cpuView === 'os_dotnet')       return s('os_type') || s('dotnet');
+                    if (cpuView === 'antivirus')       return matchesAntivirus();
                     if (cpuView === 'core_facilities') return s('core_buid') || installedFacilities(h).some(f => f.toLowerCase().includes(term));
                     if (cpuView === 'hostname_ip_mac') return s('hw_host_name') || s('hw_ip_add') || s('hw_mac_add');
                     if (cpuView === 'workstep_user')   return s('hw_user_name') || s('hw_primary_role');
                     if (cpuView === 'hdd_age')         return s('hw_memory') || s('hdd_capacity') || s('hw_date_acq');
                 }
                 if (filterHwCategory === 'SERVER') {
-                    if (serverView === 'os_av_net')       return s('os_type') || s('hw_antivi') || s('dotnet');
+                    if (serverView === 'os_dotnet')       return s('os_type') || s('dotnet');
+                    if (serverView === 'antivirus')       return matchesAntivirus();
                     if (serverView === 'hostname_ip_mac') return s('hw_host_name') || s('hw_ip_add') || s('hw_mac_add');
                     if (serverView === 'mem_hdd')         return s('hw_memory') || s('hdd_capacity') || s('hw_date_acq');
                 }
@@ -1120,9 +1578,15 @@ function MasterfileHardwareManagement() {
         let extractRow;
 
         if (filterHwCategory === 'CPU') {
-            if (cpuView === 'os_antivirus') {
-                headers = [...commonHeaders, 'OS Type', 'Antivirus', '.NET Framework'];
-                extractRow = row => [...commonExtract(row), row.os_type || '', row.hw_antivi || '', row.dotnet || ''];
+            if (cpuView === 'os_dotnet') {
+                headers = [...commonHeaders, 'OS Type', '.NET Framework'];
+                extractRow = row => [...commonExtract(row), row.os_type || '', row.dotnet || ''];
+            } else if (cpuView === 'antivirus') {
+                headers = [...commonHeaders, 'Antivirus Product', 'Version', 'Virus Definition Date', 'Last Verified'];
+                extractRow = row => {
+                    const meta = parseAntiviMeta(row.hw_antivi_meta);
+                    return [...commonExtract(row), row.hw_antivi || '', meta.version, meta.defDate, meta.lastChecked ? new Date(meta.lastChecked).toLocaleDateString() : ''];
+                };
             } else if (cpuView === 'core_facilities') {
                 headers = [...commonHeaders, 'Core Build', 'Facilities Installed'];
                 extractRow = row => [
@@ -1148,9 +1612,15 @@ function MasterfileHardwareManagement() {
                 };
             }
         } else if (filterHwCategory === 'SERVER') {
-            if (serverView === 'os_av_net') {
-                headers = [...commonHeaders, 'OS Type', 'Antivirus', '.NET Framework'];
-                extractRow = row => [...commonExtract(row), row.os_type || '', row.hw_antivi || '', row.dotnet || ''];
+            if (serverView === 'os_dotnet') {
+                headers = [...commonHeaders, 'OS Type', '.NET Framework'];
+                extractRow = row => [...commonExtract(row), row.os_type || '', row.dotnet || ''];
+            } else if (serverView === 'antivirus') {
+                headers = [...commonHeaders, 'Antivirus Product', 'Version', 'Virus Definition Date', 'Last Verified'];
+                extractRow = row => {
+                    const meta = parseAntiviMeta(row.hw_antivi_meta);
+                    return [...commonExtract(row), row.hw_antivi || '', meta.version, meta.defDate, meta.lastChecked ? new Date(meta.lastChecked).toLocaleDateString() : ''];
+                };
             } else if (serverView === 'hostname_ip_mac') {
                 headers = [...commonHeaders, 'Hostname', 'IP Address', 'MAC Address'];
                 extractRow = row => [...commonExtract(row), cleanVal(row.hw_host_name), cleanVal(row.hw_ip_add), cleanVal(row.hw_mac_add)];
@@ -1220,19 +1690,21 @@ function MasterfileHardwareManagement() {
         return <div className="p-6 text-center text-sm text-red-500 dark:text-red-400">{loadError}</div>;
     }
 
-    // ── Table style helpers ────────────────────────────────────────────────
-    const thCls = 'px-4 py-2.5 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 whitespace-nowrap';
-    const tdCls = 'px-4 py-3 text-sm text-gray-800 dark:text-gray-200 whitespace-nowrap';
-
     const colCount = (() => {
         if (filterHwCategory === 'CPU') {
             // Asset | Serial | Brand/Model | Site | [view-specific cols]
-            if (cpuView === 'os_antivirus')    return 7; // + OS Type, Antivirus, .NET
+            if (cpuView === 'os_dotnet')       return 6; // + OS Type, .NET
+            if (cpuView === 'antivirus')       return 8; // + Product, Version, Def Date, Last Verified
             if (cpuView === 'hostname_ip_mac') return 7; // + Hostname, IP, MAC
             if (cpuView === 'hdd_age')         return 9; // + Memory, HDD Health, Capacity, Free Space, Age
             return 6; // core_facilities, workstep_user: + 2 view cols
         }
-        if (filterHwCategory === 'SERVER') return serverView === 'mem_hdd' ? 9 : 7;
+        if (filterHwCategory === 'SERVER') {
+            if (serverView === 'mem_hdd')         return 9;
+            if (serverView === 'antivirus')       return 8;
+            if (serverView === 'hostname_ip_mac') return 7;
+            return 6; // os_dotnet
+        }
         if (filterHwCategory === 'SWITCH') return 8;
         return 10;
     })();
@@ -1254,15 +1726,26 @@ function MasterfileHardwareManagement() {
     // ── Dynamic table header ───────────────────────────────────────────────
     const renderHeader = () => {
         if (filterHwCategory === 'CPU') {
-            if (cpuView === 'os_antivirus') return (
+            if (cpuView === 'os_dotnet') return (
                 <tr>
                     <th className={thCls}>Asset #</th>
                     <th className={thCls}>Serial #</th>
                     <th className={thCls}>Brand / Model</th>
                     <th className={thCls}>Site</th>
                     <th className={thCls}>OS Type</th>
-                    <th className={thCls}>Antivirus</th>
                     <th className={thCls}>.NET Framework</th>
+                </tr>
+            );
+            if (cpuView === 'antivirus') return (
+                <tr>
+                    <th className={thCls}>Asset #</th>
+                    <th className={thCls}>Serial #</th>
+                    <th className={thCls}>Brand / Model</th>
+                    <th className={thCls}>Site</th>
+                    <th className={thCls}>Antivirus</th>
+                    <th className={thCls}>Version</th>
+                    <th className={thCls}>Virus Def. Date</th>
+                    <th className={thCls}>Last Verified</th>
                 </tr>
             );
             if (cpuView === 'core_facilities') return (
@@ -1336,6 +1819,19 @@ function MasterfileHardwareManagement() {
                     <th className={thCls}>MAC Address</th>
                 </tr>
             );
+            if (serverView === 'antivirus') return (
+                <tr>
+                    <th className={thCls}>Asset #</th>
+                    <th className={thCls}>Serial #</th>
+                    <th className={thCls}>Brand / Model</th>
+                    <th className={thCls}>Site</th>
+                    <th className={thCls}>Antivirus</th>
+                    <th className={thCls}>Version</th>
+                    <th className={thCls}>Virus Def. Date</th>
+                    <th className={thCls}>Last Verified</th>
+                </tr>
+            );
+            // os_dotnet
             return (
                 <tr>
                     <th className={thCls}>Asset #</th>
@@ -1343,7 +1839,6 @@ function MasterfileHardwareManagement() {
                     <th className={thCls}>Brand / Model</th>
                     <th className={thCls}>Site</th>
                     <th className={thCls}>OS Type</th>
-                    <th className={thCls}>Antivirus</th>
                     <th className={thCls}>.NET Framework</th>
                 </tr>
             );
@@ -1403,17 +1898,32 @@ function MasterfileHardwareManagement() {
         const dash = <span className="text-gray-300 dark:text-gray-600">—</span>;
 
         if (filterHwCategory === 'CPU') {
-            if (cpuView === 'os_antivirus') return (
+            if (cpuView === 'os_dotnet') return (
                 <tr key={row.hw_id} onClick={() => setSelected(row)} className={rowCls}>
                     {assetCell}
                     {serialCell}
                     {brandModel}
                     {siteCell}
-                    <td className={`${tdCls} text-xs`}>{row.os_type   || dash}</td>
-                    <td className={`${tdCls} text-xs`}>{row.hw_antivi || dash}</td>
+                    <td className={`${tdCls} text-xs`}>{row.os_type || dash}</td>
                     <td className={`${tdCls} text-xs font-mono`}>{row.dotnet || dash}</td>
                 </tr>
             );
+            if (cpuView === 'antivirus') {
+                const meta = parseAntiviMeta(row.hw_antivi_meta);
+                const info = antiviLastCheckedInfo(row.hw_antivi_meta);
+                return (
+                    <tr key={row.hw_id} onClick={() => setSelected(row)} className={rowCls}>
+                        {assetCell}
+                        {serialCell}
+                        {brandModel}
+                        {siteCell}
+                        <td className={`${tdCls} text-xs`}>{row.hw_antivi || dash}</td>
+                        <td className={`${tdCls} text-xs font-mono`}>{meta.version || dash}</td>
+                        <td className={`${tdCls} text-xs`}>{meta.defDate || dash}</td>
+                        <td className={`${tdCls} text-xs font-medium ${info.cls}`}>{info.label}</td>
+                    </tr>
+                );
+            }
             if (cpuView === 'core_facilities') {
                 const chips = installedFacilities(row);
                 return (
@@ -1541,14 +2051,30 @@ function MasterfileHardwareManagement() {
                     <td className={`${tdCls} font-mono text-xs`}>{cleanVal(row.hw_mac_add)   || dash}</td>
                 </tr>
             );
+            if (serverView === 'antivirus') {
+                const meta = parseAntiviMeta(row.hw_antivi_meta);
+                const info = antiviLastCheckedInfo(row.hw_antivi_meta);
+                return (
+                    <tr key={row.hw_id} onClick={() => setSelected(row)} className={rowCls}>
+                        {assetCell}
+                        {serialCell}
+                        {brandModel}
+                        {siteCell}
+                        <td className={`${tdCls} text-xs`}>{row.hw_antivi || dash}</td>
+                        <td className={`${tdCls} text-xs font-mono`}>{meta.version || dash}</td>
+                        <td className={`${tdCls} text-xs`}>{meta.defDate || dash}</td>
+                        <td className={`${tdCls} text-xs font-medium ${info.cls}`}>{info.label}</td>
+                    </tr>
+                );
+            }
+            // os_dotnet
             return (
                 <tr key={row.hw_id} onClick={() => setSelected(row)} className={rowCls}>
                     {assetCell}
                     {serialCell}
                     {brandModel}
                     {siteCell}
-                    <td className={`${tdCls} text-xs`}>{row.os_type   || dash}</td>
-                    <td className={`${tdCls} text-xs`}>{row.hw_antivi || dash}</td>
+                    <td className={`${tdCls} text-xs`}>{row.os_type || dash}</td>
                     <td className={`${tdCls} text-xs font-mono`}>{row.dotnet || dash}</td>
                 </tr>
             );
@@ -1647,15 +2173,34 @@ function MasterfileHardwareManagement() {
                         </p>
                     )}
                 </div>
-                {!loading && filtered.length > 0 && (
-                    <button
-                        onClick={() => setShowReportModal(true)}
-                        className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800/50 rounded-lg hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-colors"
-                    >
-                        <ArrowDownTrayIcon className="w-4 h-4" />
-                        Generate Report
-                    </button>
-                )}
+                <div className="flex items-center gap-3">
+                    {!loading && (
+                        <div ref={avMenuRef} className="relative">
+                            <AntivirusAlertBell
+                                alerts={avAlerts}
+                                open={avPopoverOpen}
+                                onToggle={() => { setShowAvHint(false); setAvPopoverOpen(o => !o); }}
+                                onViewAll={() => { setAvPopoverOpen(false); setShowAvHint(false); setShowAvModal(true); }}
+                            />
+                            {showAvHint && (
+                                <AntivirusAlertHint
+                                    alerts={avAlerts}
+                                    onOpen={() => { setShowAvHint(false); setShowAvModal(true); }}
+                                    onDismiss={() => setShowAvHint(false)}
+                                />
+                            )}
+                        </div>
+                    )}
+                    {!loading && filtered.length > 0 && (
+                        <button
+                            onClick={() => setShowReportModal(true)}
+                            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800/50 rounded-lg hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-colors"
+                        >
+                            <ArrowDownTrayIcon className="w-4 h-4" />
+                            Generate Report
+                        </button>
+                    )}
+                </div>
             </div>
 
             {/* Filters */}
@@ -1871,6 +2416,17 @@ function MasterfileHardwareManagement() {
                     onClose={() => setSelected(null)}
                     onSaved={handleSaved}
                     readOnly={role === 'ROO'}
+                />
+            )}
+
+            {/* Virus definition monitor — full list */}
+            {showAvModal && (
+                <AntivirusAlertsModal
+                    alerts={avAlerts}
+                    siteMap={siteMap}
+                    regionMap={regionMap}
+                    onClose={() => setShowAvModal(false)}
+                    onSelect={openAvAlert}
                 />
             )}
 

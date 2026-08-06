@@ -356,6 +356,123 @@ function EditRegionModal({ user, regionOptions, onClose, onSave }) {
     );
 }
 
+// ─── Edit Role Modal ─────────────────────────────────────────────────────────
+
+function EditRoleModal({ user, regionOptions, onClose, onSave }) {
+    const currentRole = ['ADM', 'ADMIN', 'ADMINISTRATOR'].includes((user.user_type || '').toUpperCase())
+        ? 'ADM'
+        : ['SPV', 'SUPERVISOR'].includes((user.user_type || '').toUpperCase())
+            ? 'SPV'
+            : (user.user_type || 'FSE').toUpperCase();
+
+    const [userType, setUserType]       = useState(currentRole);
+    const [clusterName, setClusterName] = useState(['ADM', 'ROO'].includes(currentRole) ? '' : (user.cluster_name || ''));
+    const [selectedRegions, setSelectedRegions] = useState(
+        () => (user.region_assigned || '')
+            .split(',')
+            .map(s => s.trim())
+            .filter(Boolean)
+            .map(id => regionOptions.find(o => o.value === id) || { value: id, label: `Region ${id}` })
+    );
+    const [saving, setSaving] = useState(false);
+
+    const isOrgWide = ['ADM', 'ROO'].includes(userType);
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        setSaving(true);
+        await onSave({
+            user_type:       userType,
+            cluster_name:    isOrgWide ? 'All Cluster' : clusterName,
+            region_assigned: isOrgWide ? '' : selectedRegions.map(r => r.value).join(','),
+        });
+        setSaving(false);
+    };
+
+    const inputCls = 'w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500';
+
+    return createPortal(
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md">
+                <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                    <div>
+                        <h2 className="text-lg font-bold text-gray-800 dark:text-white">Change Role</h2>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                            {user.fname} {user.lname} &bull; @{user.user_name}
+                        </p>
+                    </div>
+                    <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-2xl leading-none">×</button>
+                </div>
+
+                <form onSubmit={handleSubmit} className="px-6 py-4 space-y-4">
+                    <div>
+                        <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Role</label>
+                        <select
+                            className={inputCls}
+                            value={userType}
+                            onChange={e => {
+                                const r = e.target.value;
+                                setUserType(r);
+                                if (['ADM', 'ROO'].includes(r)) setSelectedRegions([]);
+                            }}
+                        >
+                            <option value="ADM">ADM (Administrator)</option>
+                            <option value="SPV">SPV (Supervisor)</option>
+                            <option value="FSE">FSE (Field Service Engineer)</option>
+                            <option value="ROO">ROO (Read-Only Viewer)</option>
+                        </select>
+                    </div>
+
+                    {!isOrgWide && (
+                        <div>
+                            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Cluster</label>
+                            <input type="text" className={inputCls} value={clusterName}
+                                onChange={e => setClusterName(e.target.value)}
+                                placeholder="e.g. NCR Cluster" />
+                        </div>
+                    )}
+
+                    {userType === 'FSE' && (
+                        <div>
+                            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Region Assigned</label>
+                            <Select
+                                isMulti
+                                options={regionOptions}
+                                value={selectedRegions}
+                                onChange={(v) => setSelectedRegions(v || [])}
+                                placeholder="Select regions..."
+                                classNamePrefix="react-select"
+                                styles={{
+                                    control: (b) => ({ ...b, minHeight: 38, fontSize: 14 }),
+                                    menu:    (b) => ({ ...b, zIndex: 9999 }),
+                                }}
+                            />
+                        </div>
+                    )}
+
+                    {isOrgWide && (
+                        <p className="text-xs text-gray-400 dark:text-gray-500">
+                            {userType} is an org-wide role — cluster is set to "All Cluster" and no region scoping applies.
+                        </p>
+                    )}
+
+                    <div className="flex gap-3 pt-2">
+                        <button type="button" onClick={onClose}
+                            className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg text-sm hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                            Cancel
+                        </button>
+                        <button type="submit" disabled={saving}
+                            className="flex-1 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium disabled:opacity-50 transition-colors">
+                            {saving ? 'Saving...' : 'Save Role'}
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>,
+        getModalRoot()
+    );
+}
+
 // ─── Main Page ───────────────────────────────────────────────────────────────
 
 function MasterfileUsers() {
@@ -375,6 +492,7 @@ function MasterfileUsers() {
     const [showAddModal,    setShowAddModal]    = useState(false);
     const [showResetModal,  setShowResetModal]  = useState(false);
     const [showRegionModal, setShowRegionModal] = useState(false);
+    const [showRoleModal,   setShowRoleModal]   = useState(false);
     const [selectedUser,    setSelectedUser]    = useState(null);
 
     // keep a stable ref to fetchData — avoids re-render loops since useApi
@@ -484,6 +602,21 @@ function MasterfileUsers() {
         }
     };
 
+    const handleUpdateRole = async (roleData) => {
+        const res = await postData('/api/user-tbl/update-role.json', {
+            user_id: selectedUser.id,
+            ...roleData,
+        });
+        if (res?.success) {
+            showToast('Role updated');
+            setShowRoleModal(false);
+            setSelectedUser(null);
+            loadData();
+        } else {
+            showToast(res?.error || 'Failed to update role', 'error');
+        }
+    };
+
     // Region reassignment applies to region-scoped users — i.e. anyone who is NOT
     // an admin/supervisor (cluster- or org-wide). This mirrors exactly when the
     // Region column shows a value, so the button appears for every FSE row even if
@@ -589,6 +722,14 @@ function MasterfileUsers() {
                                                             Reassign Region
                                                         </button>
                                                     )}
+                                                    {isADM && (
+                                                        <button
+                                                            onClick={() => { setSelectedUser(u); setShowRoleModal(true); }}
+                                                            className="px-3 py-1.5 text-xs font-medium text-purple-700 bg-purple-50 hover:bg-purple-100 dark:bg-purple-900/20 dark:text-purple-400 dark:hover:bg-purple-900/40 border border-purple-200 dark:border-purple-800 rounded-lg transition-colors"
+                                                        >
+                                                            Change Role
+                                                        </button>
+                                                    )}
                                                 </div>
                                             )}
                                         </td>
@@ -638,6 +779,14 @@ function MasterfileUsers() {
                     regionOptions={regionOptions}
                     onClose={() => { setShowRegionModal(false); setSelectedUser(null); }}
                     onSave={handleUpdateRegion}
+                />
+            )}
+            {showRoleModal && selectedUser && (
+                <EditRoleModal
+                    user={selectedUser}
+                    regionOptions={regionOptions}
+                    onClose={() => { setShowRoleModal(false); setSelectedUser(null); }}
+                    onSave={handleUpdateRole}
                 />
             )}
         </div>

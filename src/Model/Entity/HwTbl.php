@@ -40,6 +40,7 @@ use Cake\ORM\Entity;
  * @property string|null $dl_maint
  * @property string|null $dotnet
  * @property string|null $hw_antivi
+ * @property string|null $hw_antivi_meta
  * @property string|null $ports_num
  * @property string|null $ports_working
  * @property string|null $ports_deffect
@@ -89,6 +90,7 @@ class HwTbl extends Entity
         'dl_maint' => true,
         'dotnet' => true,
         'hw_antivi' => true,
+        'hw_antivi_meta' => true,
         'ports_num' => true,
         'ports_working' => true,
         'ports_deffect' => true,

@@ -203,6 +203,62 @@ class UserTblController extends AppController
             ]));
     }
 
+    public function updateRole()
+    {
+        $this->request->allowMethod(['post']);
+
+        $data   = $this->request->getData();
+        $userId = $data['user_id'] ?? null;
+        $type   = $data['user_type'] ?? null;
+
+        if (!$userId || !$type) {
+            return $this->response->withStatus(400)->withType('json')
+                ->withStringBody(json_encode(['success' => false, 'error' => 'user_id and user_type are required']));
+        }
+
+        try {
+            $user = $this->UserTbl->get($userId);
+        } catch (\Cake\Datasource\Exception\RecordNotFoundException $e) {
+            return $this->response->withStatus(404)->withType('json')
+                ->withStringBody(json_encode(['success' => false, 'error' => 'User not found']));
+        }
+
+        // Assign directly (not patchEntity) so this admin action never touches the
+        // acting user's own Auth session — mirrors updateRegion() above.
+        $user->user_type = $type;
+
+        if (in_array($type, ['ADM', 'ROO'], true)) {
+            // Org-wide roles carry no region scoping.
+            $user->cluster_name    = 'All Cluster';
+            $user->region_assigned = '';
+        } else {
+            if (isset($data['cluster_name'])) {
+                $user->cluster_name = $data['cluster_name'];
+            }
+            if (isset($data['region_assigned'])) {
+                $user->region_assigned = $data['region_assigned'];
+            }
+        }
+
+        if ($this->UserTbl->save($user)) {
+            return $this->response->withType('json')
+                ->withStringBody(json_encode([
+                    'success'         => true,
+                    'message'         => 'Role updated successfully',
+                    'user_type'       => $user->user_type,
+                    'cluster_name'    => $user->cluster_name,
+                    'region_assigned' => $user->region_assigned,
+                ]));
+        }
+
+        return $this->response->withStatus(400)->withType('json')
+            ->withStringBody(json_encode([
+                'success' => false,
+                'error'   => 'Could not update role',
+                'errors'  => $user->getErrors(),
+            ]));
+    }
+
     public function edit($id = null)
     {
         $userTbl = $this->UserTbl->get($id);
