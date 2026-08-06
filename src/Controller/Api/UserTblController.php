@@ -309,7 +309,11 @@ class UserTblController extends AppController
         }
 
         return $this->response->withStatus(400)->withType('json')
-            ->withStringBody(json_encode(['success' => false, 'error' => 'Could not update last_active']));
+            ->withStringBody(json_encode([
+                'success' => false,
+                'error'   => 'Could not update last_active',
+                'errors'  => $user->getErrors(),
+            ]));
     }
 
     public function edit($id = null)
@@ -410,7 +414,13 @@ class UserTblController extends AppController
             // (MasterfileLayout) keeps it fresh from here on for as long as a
             // session stays open.
             $user->last_active = $this->nowForPresence();
-            $this->UserTbl->save($user);
+            if (!$this->UserTbl->save($user)) {
+                // Login must still succeed even if this stamp fails, but log why
+                // rather than discarding save()'s result silently — a stale ORM
+                // schema cache (see heartbeat()) is the one way this has actually
+                // failed in practice, and it's otherwise invisible.
+                \Cake\Log\Log::error('last_active save failed for user_id=' . $user->id . ': ' . json_encode($user->getErrors()));
+            }
 
             $this->request->getSession()->write('Auth.User', [
                 'id' => $user->id,
