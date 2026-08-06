@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useApi } from '../../../hooks/useApi';
 import { createPortal } from 'react-dom';
+import { approveRequestCore } from '../../../utils/requestApproval';
 
 export default function RequestDetailModal({
                                                request,
@@ -190,55 +191,6 @@ export default function RequestDetailModal({
         if (file) setNewAttachment(file);
     };
 
-    // Hardware functions
-    const updateHardwareStatus = async (hwId) => {
-        if (!hwId) return true;
-        try {
-            const payload = { hw_id: hwId, hw_status: 'Pullout', updated_at: new Date().toISOString().slice(0, 19).replace('T', ' ') };
-            const result = await postData('/api/hw-tbl/update.json', payload);
-            return result?.success || false;
-        } catch (err) {
-            console.error('Hardware update error:', err);
-            return false;
-        }
-    };
-
-    const duplicateHardwareForRelocation = async () => {
-        if (!currentRequest.hw_id || !currentRequest.destination_site) return false;
-        try {
-            const res = await stableFetchData.current(`/api/hw-tbl/view/${currentRequest.hw_id}.json`);
-            const original = res?.hwTbl || res?.HwTbl || {};
-            if (!original.hw_id) return false;
-
-            const newHwData = {
-                region_name: original.region_name || '',
-                site_code: currentRequest.destination_site,
-                hw_asset_num: original.hw_asset_num || '',
-                hw_serial_num: original.hw_serial_num || '',
-                item_desc: original.item_desc || '',
-                hw_brand_name: original.hw_brand_name || '',
-                hw_model: original.hw_model || '',
-                hw_status: 'On Site',
-                user_id: original.user_id || 1,
-                hw_date_acq: original.hw_date_acq || new Date().toISOString().slice(0, 10),
-                hw_acq_val: original.hw_acq_val || 0,
-                hw_host_name: original.hw_host_name || `reloc-${Date.now()}`,
-                hw_ip_add: original.hw_ip_add || '0.0.0.0',
-                hw_mac_add: original.hw_mac_add || '00:00:00:00:00:00',
-                hw_user_name: original.hw_user_name || 'System',
-                hw_primary_role: original.hw_primary_role || 'User',
-                hw_remarks: original.hw_remarks || `Relocated from ${original.site_code || 'previous site'}`,
-                created_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
-                updated_at: new Date().toISOString().slice(0, 19).replace('T', ' ')
-            };
-
-            const result = await postData('/api/hw-tbl/add.json', newHwData);
-            return result?.success || false;
-        } catch (err) {
-            console.error('Error duplicating hardware for relocation:', err);
-            return false;
-        }
-    };
 
     // Delete request (FSE only on REJECTED)
     const handleDelete = async () => {
@@ -308,35 +260,52 @@ export default function RequestDetailModal({
 
     const executeAction = async (action, reason = '') => {
         setActionLoading(true);
-        const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
-
-        let newStatus = action === 'approve' ? 'APPROVED' : action === 'reject' ? 'REJECTED' : 'CANCELED';
-
-        const payload = {
-            request_id: currentRequest.request_id,
-            status: newStatus,
-            updated_at: now,
-        };
-
-        if (action === 'approve' || action === 'reject') {
-            const user = JSON.parse(sessionStorage.getItem('user') || '{}');
-            payload.approved_by = user?.id || user?.user_id || 1;
-            payload.approved_at = now;
-        }
-        if (action === 'reject' && reason) payload.approval_remarks = reason;
-
         try {
-            if (action === 'approve' && newAttachment) {
-                const formData = new FormData();
-                formData.append('attachment', newAttachment);
-                formData.append('request_id', currentRequest.request_id);
+            if (action === 'approve') {
+                if (newAttachment) {
+                    const formData = new FormData();
+                    formData.append('attachment', newAttachment);
+                    formData.append('request_id', currentRequest.request_id);
 
-                const uploadResult = await postFormData(`/api/request-tbl/update-attachment/${currentRequest.request_id}.json`, formData);
-                if (!uploadResult?.success) {
-                    alert('Failed to upload new attachment.');
-                    setActionLoading(false);
+                    const uploadResult = await postFormData(`/api/request-tbl/update-attachment/${currentRequest.request_id}.json`, formData);
+                    if (!uploadResult?.success) {
+                        alert('Failed to upload new attachment.');
+                        return;
+                    }
+                }
+
+                const user = JSON.parse(sessionStorage.getItem('user') || '{}');
+                const result = await approveRequestCore({
+                    fetchData: stableFetchData.current,
+                    postData,
+                    request: currentRequest,
+                    approverId: user?.id || user?.user_id || 1,
+                });
+                if (!result.success) {
+                    alert(result.error || 'Failed to approve request');
                     return;
                 }
+
+                await refreshRequest();
+                alert(result.warning || 'Request approved successfully!');
+                onApprove?.();
+                return;
+            }
+
+            const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+            const newStatus = action === 'reject' ? 'REJECTED' : 'CANCELED';
+
+            const payload = {
+                request_id: currentRequest.request_id,
+                status: newStatus,
+                updated_at: now,
+            };
+
+            if (action === 'reject') {
+                const user = JSON.parse(sessionStorage.getItem('user') || '{}');
+                payload.approved_by = user?.id || user?.user_id || 1;
+                payload.approved_at = now;
+                if (reason) payload.approval_remarks = reason;
             }
 
             const result = await postData('/api/request-tbl/update.json', payload);
@@ -345,20 +314,10 @@ export default function RequestDetailModal({
                 return;
             }
 
-            if (action === 'approve') {
-                if (isRelocation && currentRequest.hw_id) {
-                    await updateHardwareStatus(currentRequest.hw_id);
-                    await duplicateHardwareForRelocation();
-                } else if (isPullOut && currentRequest.hw_id) {
-                    await updateHardwareStatus(currentRequest.hw_id);
-                }
-            }
-
             await refreshRequest();
             alert(`Request ${action}ed successfully!`);
 
-            if (action === 'approve') onApprove?.();
-            else if (action === 'reject') onReject?.();
+            if (action === 'reject') onReject?.();
             else if (action === 'cancel') onCancel?.();
 
         } catch (err) {

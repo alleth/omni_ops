@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { useApi } from '../../hooks/useApi';
 import RequestDetailModal from './components/RequestDetailModal';
+import { approveRequestCore } from '../../utils/requestApproval';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const PLACEHOLDERS = new Set([
@@ -109,8 +110,9 @@ function MasterfileDashboard() {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [showAllPullOuts, setShowAllPullOuts] = useState(false);
     const [selectedIds, setSelectedIds] = useState([]);
+    const [bulkApproving, setBulkApproving] = useState(false);
 
-    const { fetchMany, fetchData } = useApi();
+    const { fetchMany, fetchData, postData } = useApi();
     const fetchManyRef = useRef(fetchMany);
     const fetchDataRef = useRef(fetchData);
     useEffect(() => { fetchManyRef.current = fetchMany; fetchDataRef.current = fetchData; });
@@ -180,6 +182,47 @@ function MasterfileDashboard() {
             setRequestLoading(false);
         }
     }, [isFSE, isSPV, isADM, userId, user.cluster_name]);
+
+    // ── Bulk approve (SPV) ──────────────────────────────────────────────────
+    // Applies approveRequestCore to every selected request in turn. Unlike the
+    // single-request modal, this never requires re-attaching a signed document
+    // per item — see requestApproval.js for why. Reports partial failure
+    // instead of a flat success/fail so a supervisor approving 10 requests can
+    // tell which 1 needs a second look, rather than re-triggering all 10.
+    const handleBulkApprove = async () => {
+        const targets = requests.filter(r => selectedIds.includes(r.request_id));
+        if (targets.length === 0) return;
+        if (!window.confirm(`Approve ${targets.length} request(s)?`)) return;
+
+        setBulkApproving(true);
+        const approverId = userId || 1;
+        const failures = [];
+        const warnings = [];
+
+        for (const req of targets) {
+            const result = await approveRequestCore({
+                fetchData: fetchDataRef.current,
+                postData,
+                request: req,
+                approverId,
+            });
+            if (!result.success) failures.push(`#${req.request_id}: ${result.error || 'failed'}`);
+            else if (result.warning) warnings.push(result.warning);
+        }
+
+        setBulkApproving(false);
+        setSelectedIds([]);
+        await loadRequests();
+
+        if (failures.length === 0 && warnings.length === 0) {
+            alert(`Approved ${targets.length} request(s) successfully!`);
+        } else {
+            const parts = [`Approved ${targets.length - failures.length} of ${targets.length} request(s).`];
+            if (warnings.length) parts.push(...warnings);
+            if (failures.length) parts.push('Failed:', ...failures);
+            alert(parts.join('\n'));
+        }
+    };
 
     useEffect(() => { loadRequests(); }, [loadRequests]);
 
@@ -761,9 +804,9 @@ function MasterfileDashboard() {
                                 </>
                             )}
                             {isSPV && selectedIds.length > 0 && (
-                                <button onClick={() => alert(`Approving ${selectedIds.length} request(s)`)}
-                                    className="px-3 py-1.5 text-sm font-medium bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors">
-                                    Approve ({selectedIds.length})
+                                <button onClick={handleBulkApprove} disabled={bulkApproving}
+                                    className="px-3 py-1.5 text-sm font-medium bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                                    {bulkApproving ? 'Approving…' : `Approve (${selectedIds.length})`}
                                 </button>
                             )}
                         </div>
