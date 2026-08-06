@@ -164,7 +164,7 @@ Protected routes:
 2. Components call `useApi()` hook: `fetchData(endpoint)`, `fetchMany(...endpoints)`, `postData(endpoint, data)`, `postFormData(endpoint, formData)`
 3. `fetchMasterfileData()` is a convenience method on `useApi()` that batch-fetches the reference endpoints needed by the inventory page in parallel
 4. State is local per component; dark mode preference stored in `localStorage.darkMode`
-5. A 15-minute inactivity timer (`dev/src/utils/session.js`) shows a timeout modal and redirects to login
+5. A 30-minute *inactivity* timer (`dev/src/utils/session.js`, wired up in `MasterfileLayout`) shows a timeout modal and redirects to login. Genuinely activity-based: `startActivityTracking()` listens for `mousedown`/`mousemove`/`keydown`/`wheel`/`touchstart` (throttled to once per 5s) and resets the countdown on each one — until this was added, `resetSessionTimer()` existed but nothing ever called it, so the timer just counted down unconditionally from page-load and logged users out on a fixed schedule regardless of activity. Deliberately independent of the presence heartbeat (`MasterfileLayout`, see Role-Based Access → online/offline) — that only proves the tab is open, not that anyone's actually at the keyboard.
 6. `useApi` always uses relative URL paths (empty string prefix); the CRA proxy in `package.json` forwards `/api/*` requests to `http://omniops.local` during development
 7. **A few components bypass `useApi` with host-detected absolute URLs** — do not assume all network calls go through the hook or the CRA proxy:
    - `MasterfileLogin.js` and `MasterfileProfile.js` build their own `API_BASE` / hardcode `http://omniops.local` for login and profile-update `fetch` calls.
@@ -199,7 +199,7 @@ Protected routes:
 - In `MasterfileHardwareManagement`, editing a CPU/server's `hw_ip_add` / `hw_mac_add` runs a client-side duplicate check (`findNetworkDuplicate`) against all On Site units org-wide (any region). MACs are normalized to hex digits only (separator-agnostic); IPs/MACs are format-validated first (`isValidIp`/`isValidMac`), and a conflicting unit's asset tag + site are reported in the save error.
 - PDF reports use jsPDF, pdf-lib, and react-pdf; `BulkRequestModal` generates PDFs client-side using pdf-lib. PULL_OUT form collects: delivery method, tracking number, delivered by, pickup date, and a pullout form file. RELOCATION form collects: service request no., date, return date, reason, from/to accountable persons, and transfer site code.
 - Dark mode reads system preference via `window.matchMedia('(prefers-color-scheme: dark)')` as initial value, then persists toggle to `localStorage.darkMode`; applies by adding `dark` class to `document.documentElement`
-- The 15-minute session timer (`dev/src/utils/session.js`) creates its modal imperatively via `document.createElement` — it is not a React component
+- The 30-minute inactivity session timer (`dev/src/utils/session.js`) creates its modal imperatively via `document.createElement` — it is not a React component
 - Bulk action buttons in `MasterfileDashboard` (Approve for SPV, Cancel/Delete for FSE) are stubs — they currently call `alert()` / `window.confirm()` and do not make API requests. The UI scaffolding exists but the API wiring is not yet implemented.
 - `MasterfileInventory` shows toast notifications for add/edit/delete actions and skeleton loaders (`SkeletonRow`, `SkeletonTableCard`) during data fetch
 

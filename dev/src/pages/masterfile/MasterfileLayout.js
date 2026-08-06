@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Outlet, useLocation, Link, useNavigate } from 'react-router-dom';
-import { startSessionTimer } from '../../utils/session';
+import { startSessionTimer, startActivityTracking } from '../../utils/session';
 import { useApi } from '../../hooks/useApi';
 import {
     HiMenuAlt3,
@@ -74,11 +74,17 @@ function MasterfileLayout() {
         return () => window.removeEventListener('resize', handleResize);
     }, []);
 
-    // Session Timer — no dependency on user (prevents loop)
+    // Session Timer — no dependency on user (prevents loop). Starts the 30-min
+    // countdown and wires up real activity tracking (mouse/keyboard/scroll) to
+    // reset it — without this, the timer just counts down unconditionally from
+    // mount and logs the user out on a fixed schedule regardless of activity.
     useEffect(() => {
         if (user?.user_name) {
-            startSessionTimer(() => navigate('/masterfile/login'));
+            const goToLogin = () => navigate('/masterfile/login');
+            startSessionTimer(goToLogin);
+            return startActivityTracking(goToLogin);
         }
+        return undefined;
     }, [navigate]);
 
     // Presence heartbeat — stamps last_active so the Users tab can show
