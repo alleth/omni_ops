@@ -46,7 +46,17 @@ export default function RequestDetailModal({
         stableFetchData.current = fetchData;
     }, [fetchData]);
 
-    // Reset when new request opens
+    // Reset when a genuinely different request opens (or this same one is
+    // reopened after being closed) -- keyed on request_id + isOpen, NOT on
+    // the `request` object reference. Pages like MasterfileRequestMonitoring
+    // derive their `request` prop with useMemo from a list that gets a fresh
+    // array (and thus fresh object identities) on every refetch, so saving
+    // an in-place edit (tracking #, SR #, etc.) via handleSaveDetails ->
+    // onUpdate -> the page's reload triggers a brand-new `request` object
+    // for the *same* request_id. Depending on the object itself here made
+    // that look like "a new request just opened," resetting imageLoaded to
+    // false and replaying the fake loading-progress spinner over an
+    // attachment image that hadn't actually changed or reloaded.
     useEffect(() => {
         setMounted(true);
         if (request && request.request_id) {
@@ -58,7 +68,8 @@ export default function RequestDetailModal({
             setEditingDetails(false);
             setDetailsError('');
         }
-    }, [request]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [request?.request_id, isOpen]);
 
     // Load sites
     const loadSites = useCallback(async () => {
