@@ -16,6 +16,7 @@
 // toggles below -- no resize listener needed, it's pure Tailwind).
 import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { useApi } from '../../hooks/useApi';
+import RequestDetailModal from './components/RequestDetailModal';
 
 const PAGE_SIZE = 25;
 
@@ -85,6 +86,14 @@ function MasterfileRequestMonitoring() {
     const [search, setSearch] = useState('');
     const [page, setPage] = useState(1);
     const [selectedId, setSelectedId] = useState(null);
+    // Approve/reject is deliberately NOT reimplemented here -- it reuses the
+    // same RequestDetailModal every other approval entry point uses, so the
+    // hardware side effects (flip to Pullout; for RELOCATION, duplicate the
+    // hardware record at the destination site as On Site -- see
+    // approveRequestCore in utils/requestActions.js) and the "SPV must attach
+    // a newly signed document before approving" rule can't drift between
+    // this page and the Dashboard's modal/bulk-approve.
+    const [isApprovalModalOpen, setIsApprovalModalOpen] = useState(false);
 
     const load = useCallback(async () => {
         setLoading(true);
@@ -392,6 +401,17 @@ function MasterfileRequestMonitoring() {
                                     <StatusBadge status={selected.status} />
                                 </div>
 
+                                {isSPV && (selected.status || 'PENDING').toUpperCase() === 'PENDING' && (
+                                    <div className="flex gap-3 pt-4">
+                                        <button
+                                            onClick={() => setIsApprovalModalOpen(true)}
+                                            className="px-4 py-2 text-sm font-medium bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors"
+                                        >
+                                            Review to Approve / Reject
+                                        </button>
+                                    </div>
+                                )}
+
                                 <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-4 pt-5">
                                     <Field label="Asset #" value={selected.asset_num} mono />
                                     <Field label="Serial #" value={selected.serial_num} mono />
@@ -446,6 +466,18 @@ function MasterfileRequestMonitoring() {
                     </div>
                 </div>
             </div>
+
+            <RequestDetailModal
+                request={selected}
+                isOpen={isApprovalModalOpen}
+                onClose={() => setIsApprovalModalOpen(false)}
+                userRole={role}
+                onApprove={load}
+                onReject={load}
+                onCancel={load}
+                onDelete={load}
+                onUpdate={load}
+            />
         </div>
     );
 }
