@@ -13,6 +13,7 @@ export default function RequestDetailModal({
                                                onReject,
                                                onCancel,
                                                onDelete,           // New optional prop to refresh list after delete
+                                               onUpdate,           // Optional prop to refresh list after an in-place edit
                                            }) {
     const { fetchData, postData, postFormData } = useApi();
 
@@ -32,6 +33,13 @@ export default function RequestDetailModal({
     const [newAttachment, setNewAttachment] = useState(null);
     const [showReplaceOverlay, setShowReplaceOverlay] = useState(false);
 
+    // Editing Tracking/SR Info + Remarks — FSE, own request, still PENDING only
+    // (once SPV has approved or rejected, the request is no longer "theirs" to change)
+    const [editingDetails, setEditingDetails] = useState(false);
+    const [detailsForm, setDetailsForm] = useState({ tracking_num: '', sr_num: '', sr_date: '', return_date: '', remarks: '' });
+    const [detailsSaving, setDetailsSaving] = useState(false);
+    const [detailsError, setDetailsError] = useState('');
+
     // Stable fetchData
     const stableFetchData = useRef(fetchData);
     useEffect(() => {
@@ -47,6 +55,8 @@ export default function RequestDetailModal({
             setLoadProgress(0);
             setNewAttachment(null);
             setShowReplaceOverlay(false);
+            setEditingDetails(false);
+            setDetailsError('');
         }
     }, [request]);
 
@@ -127,6 +137,57 @@ export default function RequestDetailModal({
     const statusUpper = currentRequest.status?.toUpperCase() || 'PENDING';
     const isPullOut = currentRequest.request_type?.toUpperCase() === 'PULL_OUT';
     const isRelocation = currentRequest.request_type?.toUpperCase() === 'RELOCATION';
+
+    // FSE can still edit Tracking/SR Info + Remarks on their own request as long as
+    // it's still PENDING — once SPV approves or rejects it, the record of what was
+    // requested should stop moving. Not shared with the bulk cancel/delete "REJECTED
+    // = selectable" gate above (MasterfileDashboard.js) — this is a single-request,
+    // PENDING-only capability.
+    const sessionUser = JSON.parse(sessionStorage.getItem('user') || '{}');
+    const currentUserId = sessionUser?.id || sessionUser?.user_id;
+    const isOwnRequest = currentUserId != null && String(currentRequest.requested_by) === String(currentUserId);
+    const canEditDetails = isFSE && isOwnRequest && statusUpper === 'PENDING';
+
+    const startEditingDetails = () => {
+        setDetailsForm({
+            tracking_num: currentRequest.tracking_num || '',
+            sr_num: currentRequest.sr_num || '',
+            sr_date: currentRequest.sr_date || '',
+            return_date: currentRequest.return_date || '',
+            remarks: currentRequest.remarks || '',
+        });
+        setDetailsError('');
+        setEditingDetails(true);
+    };
+
+    const handleSaveDetails = async () => {
+        setDetailsSaving(true);
+        setDetailsError('');
+        try {
+            const result = await postData('/api/request-tbl/update.json', {
+                request_id: currentRequest.request_id,
+                tracking_num: detailsForm.tracking_num.trim(),
+                // sr_num is validated server-side as an integer (see RequestTblTable),
+                // matching how BulkRequestModal sends it on request creation.
+                sr_num: detailsForm.sr_num !== '' ? Number(detailsForm.sr_num) : null,
+                sr_date: detailsForm.sr_date || null,
+                return_date: detailsForm.return_date || null,
+                remarks: detailsForm.remarks.trim(),
+            });
+            if (result?.success) {
+                await refreshRequest();
+                setEditingDetails(false);
+                onUpdate?.();
+            } else {
+                setDetailsError(result?.message || 'Failed to save changes.');
+            }
+        } catch (err) {
+            console.error('Save request details error:', err);
+            setDetailsError('Network error while saving changes.');
+        } finally {
+            setDetailsSaving(false);
+        }
+    };
 
     const formatRelativeTime = (dateStr) => {
         if (!dateStr) return '—';
@@ -506,21 +567,79 @@ export default function RequestDetailModal({
                             )}
 
                             <div className="border-t border-gray-100 dark:border-gray-800 pt-4">
-                                <h4 className="text-base font-medium text-gray-900 dark:text-gray-100 mb-3">Tracking / SR Info</h4>
-                                <div className="grid grid-cols-2 gap-4 text-sm">
-                                    <div><span className="text-xs text-gray-500 dark:text-gray-400 block mb-0.5">Tracking Number</span><span className="text-gray-900 dark:text-gray-100 font-medium">{currentRequest.tracking_num || '—'}</span></div>
-                                    <div><span className="text-xs text-gray-500 dark:text-gray-400 block mb-0.5">SR Number</span><span className="text-gray-900 dark:text-gray-100 font-medium">{currentRequest.sr_num || '—'}</span></div>
-                                    <div><span className="text-xs text-gray-500 dark:text-gray-400 block mb-0.5">SR Date</span><span className="text-gray-900 dark:text-gray-100 font-medium">{currentRequest.sr_date || '—'}</span></div>
-                                    <div><span className="text-xs text-gray-500 dark:text-gray-400 block mb-0.5">Return Date</span><span className="text-gray-900 dark:text-gray-100 font-medium">{currentRequest.return_date || '—'}</span></div>
+                                <div className="flex items-center justify-between mb-3">
+                                    <h4 className="text-base font-medium text-gray-900 dark:text-gray-100">Tracking / SR Info</h4>
+                                    {canEditDetails && !editingDetails && (
+                                        <button onClick={startEditingDetails} className="text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300">
+                                            Edit
+                                        </button>
+                                    )}
                                 </div>
-                            </div>
 
-                            {currentRequest.remarks && (
-                                <div className="border-t border-gray-100 dark:border-gray-800 pt-4">
-                                    <h4 className="text-base font-medium text-gray-900 dark:text-gray-100 mb-2">Remarks</h4>
-                                    <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap leading-relaxed">{currentRequest.remarks}</p>
-                                </div>
-                            )}
+                                {editingDetails ? (
+                                    <div className="space-y-4">
+                                        <div className="grid grid-cols-2 gap-4 text-sm">
+                                            <div>
+                                                <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Tracking Number</label>
+                                                <input type="text" value={detailsForm.tracking_num}
+                                                    onChange={e => setDetailsForm(f => ({ ...f, tracking_num: e.target.value }))}
+                                                    className="w-full px-3 py-1.5 text-sm font-mono rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none" />
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">SR Number</label>
+                                                <input type="number" value={detailsForm.sr_num}
+                                                    onChange={e => setDetailsForm(f => ({ ...f, sr_num: e.target.value }))}
+                                                    className="w-full px-3 py-1.5 text-sm rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none" />
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">SR Date</label>
+                                                <input type="date" value={detailsForm.sr_date}
+                                                    onChange={e => setDetailsForm(f => ({ ...f, sr_date: e.target.value }))}
+                                                    className="w-full px-3 py-1.5 text-sm rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none" />
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Return Date</label>
+                                                <input type="date" value={detailsForm.return_date}
+                                                    onChange={e => setDetailsForm(f => ({ ...f, return_date: e.target.value }))}
+                                                    className="w-full px-3 py-1.5 text-sm rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none" />
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Remarks</label>
+                                            <textarea value={detailsForm.remarks}
+                                                onChange={e => setDetailsForm(f => ({ ...f, remarks: e.target.value }))}
+                                                rows={3}
+                                                className="w-full px-3 py-2 text-sm rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none resize-none" />
+                                        </div>
+                                        {detailsError && <p className="text-xs text-red-500">{detailsError}</p>}
+                                        <div className="flex gap-3">
+                                            <button onClick={handleSaveDetails} disabled={detailsSaving}
+                                                className="px-4 py-2 text-xs font-medium bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-md transition-colors">
+                                                {detailsSaving ? 'Saving…' : 'Save Changes'}
+                                            </button>
+                                            <button onClick={() => { setEditingDetails(false); setDetailsError(''); }} disabled={detailsSaving}
+                                                className="px-4 py-2 text-xs font-medium text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-md transition-colors">
+                                                Cancel
+                                            </button>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <>
+                                        <div className="grid grid-cols-2 gap-4 text-sm">
+                                            <div><span className="text-xs text-gray-500 dark:text-gray-400 block mb-0.5">Tracking Number</span><span className="text-gray-900 dark:text-gray-100 font-medium">{currentRequest.tracking_num || '—'}</span></div>
+                                            <div><span className="text-xs text-gray-500 dark:text-gray-400 block mb-0.5">SR Number</span><span className="text-gray-900 dark:text-gray-100 font-medium">{currentRequest.sr_num || '—'}</span></div>
+                                            <div><span className="text-xs text-gray-500 dark:text-gray-400 block mb-0.5">SR Date</span><span className="text-gray-900 dark:text-gray-100 font-medium">{currentRequest.sr_date || '—'}</span></div>
+                                            <div><span className="text-xs text-gray-500 dark:text-gray-400 block mb-0.5">Return Date</span><span className="text-gray-900 dark:text-gray-100 font-medium">{currentRequest.return_date || '—'}</span></div>
+                                        </div>
+                                        {currentRequest.remarks && (
+                                            <div className="mt-4">
+                                                <span className="text-xs text-gray-500 dark:text-gray-400 block mb-0.5">Remarks</span>
+                                                <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap leading-relaxed">{currentRequest.remarks}</p>
+                                            </div>
+                                        )}
+                                    </>
+                                )}
+                            </div>
                         </div>
                     </div>
 

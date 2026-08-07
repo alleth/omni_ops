@@ -982,6 +982,7 @@ function MasterfileDashboard() {
                 onReject={loadRequests}
                 onCancel={loadRequests}
                 onDelete={loadRequests}
+                onUpdate={loadRequests}
             />
         </div>
     );
