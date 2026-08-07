@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { useApi } from '../../hooks/useApi';
 import RequestDetailModal from './components/RequestDetailModal';
-import { approveRequestCore } from '../../utils/requestApproval';
+import { approveRequestCore, cancelRequestCore, deleteRequestCore } from '../../utils/requestActions';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const PLACEHOLDERS = new Set([
@@ -111,6 +111,8 @@ function MasterfileDashboard() {
     const [showAllPullOuts, setShowAllPullOuts] = useState(false);
     const [selectedIds, setSelectedIds] = useState([]);
     const [bulkApproving, setBulkApproving] = useState(false);
+    const [bulkCanceling, setBulkCanceling] = useState(false);
+    const [bulkDeleting, setBulkDeleting] = useState(false);
 
     const { fetchMany, fetchData, postData } = useApi();
     const fetchManyRef = useRef(fetchMany);
@@ -221,6 +223,55 @@ function MasterfileDashboard() {
             if (warnings.length) parts.push(...warnings);
             if (failures.length) parts.push('Failed:', ...failures);
             alert(parts.join('\n'));
+        }
+    };
+
+    // ── Bulk cancel (FSE, own PENDING requests) ─────────────────────────────
+    // Only acts on the selected requests that are actually PENDING — the
+    // button itself is only shown when at least one selected item qualifies,
+    // but the selection can still be a mix of statuses.
+    const handleBulkCancel = async () => {
+        const targets = requests.filter(r => selectedIds.includes(r.request_id) && r.status?.toUpperCase() === 'PENDING');
+        if (targets.length === 0) return;
+        if (!window.confirm(`Cancel ${targets.length} request(s)?`)) return;
+
+        setBulkCanceling(true);
+        const failures = [];
+        for (const req of targets) {
+            const result = await cancelRequestCore({ postData, request: req });
+            if (!result.success) failures.push(`#${req.request_id}: ${result.error || 'failed'}`);
+        }
+        setBulkCanceling(false);
+        setSelectedIds([]);
+        await loadRequests();
+
+        if (failures.length === 0) {
+            alert(`Canceled ${targets.length} request(s) successfully!`);
+        } else {
+            alert([`Canceled ${targets.length - failures.length} of ${targets.length} request(s).`, 'Failed:', ...failures].join('\n'));
+        }
+    };
+
+    // ── Bulk delete (FSE, own REJECTED requests) ────────────────────────────
+    const handleBulkDelete = async () => {
+        const targets = requests.filter(r => selectedIds.includes(r.request_id) && r.status?.toUpperCase() === 'REJECTED');
+        if (targets.length === 0) return;
+        if (!window.confirm(`Permanently delete ${targets.length} rejected request(s)? This action cannot be undone.`)) return;
+
+        setBulkDeleting(true);
+        const failures = [];
+        for (const req of targets) {
+            const result = await deleteRequestCore({ request: req });
+            if (!result.success) failures.push(`#${req.request_id}: ${result.error || 'failed'}`);
+        }
+        setBulkDeleting(false);
+        setSelectedIds([]);
+        await loadRequests();
+
+        if (failures.length === 0) {
+            alert(`Deleted ${targets.length} request(s) successfully!`);
+        } else {
+            alert([`Deleted ${targets.length - failures.length} of ${targets.length} request(s).`, 'Failed:', ...failures].join('\n'));
         }
     };
 
@@ -486,10 +537,16 @@ function MasterfileDashboard() {
         if (selectedIds.length > 0) { setSelectedIds([]); return; }
         setSelectedIds(
             isFSE
-                ? requests.filter(r => r.status?.toUpperCase() === 'REJECTED').map(r => r.request_id)
+                ? requests.filter(r => ['PENDING', 'REJECTED'].includes(r.status?.toUpperCase())).map(r => r.request_id)
                 : requests.map(r => r.request_id)
         );
     };
+
+    // Bulk action button counts — the selection can be a mix of statuses, so
+    // these count only the subset each button will actually act on, not the
+    // raw selection size (which would misrepresent what "Cancel (N)" does).
+    const pendingSelectedCount = requests.filter(r => selectedIds.includes(r.request_id) && r.status?.toUpperCase() === 'PENDING').length;
+    const rejectedSelectedCount = requests.filter(r => selectedIds.includes(r.request_id) && r.status?.toUpperCase() === 'REJECTED').length;
 
     // ── Render ────────────────────────────────────────────────────────────────
     return (
@@ -789,16 +846,16 @@ function MasterfileDashboard() {
                         <div className="flex gap-2">
                             {isFSE && selectedIds.length > 0 && (
                                 <>
-                                    {requests.some(r => selectedIds.includes(r.request_id) && r.status?.toUpperCase() === 'PENDING') && (
-                                        <button onClick={() => alert(`Cancelling ${selectedIds.length} request(s)`)}
-                                            className="px-3 py-1.5 text-sm font-medium bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors">
-                                            Cancel ({selectedIds.length})
+                                    {pendingSelectedCount > 0 && (
+                                        <button onClick={handleBulkCancel} disabled={bulkCanceling}
+                                            className="px-3 py-1.5 text-sm font-medium bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                                            {bulkCanceling ? 'Canceling…' : `Cancel (${pendingSelectedCount})`}
                                         </button>
                                     )}
-                                    {requests.some(r => selectedIds.includes(r.request_id) && r.status?.toUpperCase() === 'REJECTED') && (
-                                        <button onClick={() => { if (window.confirm(`Delete ${selectedIds.length} rejected request(s)?`)) { setSelectedIds([]); loadRequests(); } }}
-                                            className="px-3 py-1.5 text-sm font-medium bg-red-700 hover:bg-red-800 text-white rounded-lg transition-colors">
-                                            Delete ({selectedIds.length})
+                                    {rejectedSelectedCount > 0 && (
+                                        <button onClick={handleBulkDelete} disabled={bulkDeleting}
+                                            className="px-3 py-1.5 text-sm font-medium bg-red-700 hover:bg-red-800 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                                            {bulkDeleting ? 'Deleting…' : `Delete (${rejectedSelectedCount})`}
                                         </button>
                                     )}
                                 </>
@@ -853,7 +910,7 @@ function MasterfileDashboard() {
                                 </thead>
                                 <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-100 dark:divide-gray-800">
                                     {requests.map(req => {
-                                        const selectable = !isFSE || req.status?.toUpperCase() === 'REJECTED';
+                                        const selectable = !isFSE || ['PENDING', 'REJECTED'].includes(req.status?.toUpperCase());
                                         return (
                                             <tr key={req.request_id}
                                                 onClick={() => { setSelectedRequest(req); setIsModalOpen(true); }}

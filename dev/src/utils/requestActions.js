@@ -1,17 +1,18 @@
-// src/utils/requestApproval.js
+// src/utils/requestActions.js
 //
-// Shared by RequestDetailModal (single-request approve) and MasterfileDashboard
-// (bulk approve) so the side effects of approving a request — flipping the
-// underlying hardware to "Pullout", and for RELOCATION requests, duplicating
-// the hardware record at the destination site — live in exactly one place.
-// Two independent copies of this logic is how they'd quietly drift apart.
+// Shared by RequestDetailModal (single-request actions) and MasterfileDashboard
+// (bulk actions) so approve/cancel/delete — and approve's side effects, namely
+// flipping the underlying hardware to "Pullout" and, for RELOCATION requests,
+// duplicating the hardware record at the destination site — live in exactly
+// one place. Two independent copies of this logic is how they'd quietly drift
+// apart between the single-request and bulk entry points.
 //
-// Deliberately does NOT handle attachment replacement: that's a single-request,
-// SPV-specific step (RequestDetailModal requires attaching a newly signed
-// document before approving one request at a time) that doesn't translate to
-// a bulk action — requiring N separate file uploads through a bulk-select UI
-// isn't practical, so bulk approve intentionally skips it and approves with
-// whatever attachment (if any) is already on file.
+// approveRequestCore() deliberately does NOT handle attachment replacement:
+// that's a single-request, SPV-specific step (RequestDetailModal requires
+// attaching a newly signed document before approving one request at a time)
+// that doesn't translate to a bulk action — requiring N separate file uploads
+// through a bulk-select UI isn't practical, so bulk approve intentionally
+// skips it and approves with whatever attachment (if any) is already on file.
 
 const nowStr = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
 
@@ -107,4 +108,43 @@ export async function approveRequestCore({ fetchData, postData, request, approve
     }
 
     return { success: true };
+}
+
+/**
+ * Cancels one (typically PENDING) request — status -> CANCELED. No hardware
+ * side effects: a cancel means the request never went anywhere, unlike a
+ * reject (which can follow an approval) or a delete.
+ */
+export async function cancelRequestCore({ postData, request }) {
+    const result = await postData('/api/request-tbl/update.json', {
+        request_id: request.request_id,
+        status: 'CANCELED',
+        updated_at: nowStr(),
+    });
+    if (!result?.success) {
+        return { success: false, error: result?.message || `Failed to cancel request #${request.request_id}` };
+    }
+    return { success: true };
+}
+
+/**
+ * Permanently deletes one (typically REJECTED) request row. Mirrors
+ * RequestDetailModal's existing handleDelete — a plain fetch rather than
+ * useApi's postData, since this is the one action that's a real HTTP DELETE.
+ */
+export async function deleteRequestCore({ request }) {
+    try {
+        const res = await fetch(`/api/request-tbl/delete/${request.request_id}.json`, {
+            method: 'DELETE',
+            headers: { Accept: 'application/json' },
+        });
+        const result = await res.json();
+        if (result?.message?.toLowerCase().includes('success') || result?.success) {
+            return { success: true };
+        }
+        return { success: false, error: `Failed to delete request #${request.request_id}` };
+    } catch (err) {
+        console.error('Delete error:', err);
+        return { success: false, error: `Network error deleting request #${request.request_id}` };
+    }
 }

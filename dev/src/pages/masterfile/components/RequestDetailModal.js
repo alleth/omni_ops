@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useApi } from '../../../hooks/useApi';
 import { createPortal } from 'react-dom';
-import { approveRequestCore } from '../../../utils/requestApproval';
+import { approveRequestCore, cancelRequestCore, deleteRequestCore } from '../../../utils/requestActions';
 
 export default function RequestDetailModal({
                                                request,
@@ -202,21 +202,15 @@ export default function RequestDetailModal({
         setActionLoading(true);
 
         try {
-            // Using your existing delete endpoint
-            const res = await fetch(`${window.location.origin.includes('localhost') ? '' : ''}/api/request-tbl/delete/${currentRequest.request_id}.json`, {
-                method: 'DELETE',
-                headers: { 'Accept': 'application/json' }
-            });
+            const result = await deleteRequestCore({ request: currentRequest });
 
-            const result = await res.json();
-
-            if (result?.message?.toLowerCase().includes('success') || result?.success) {
+            if (result.success) {
                 alert('Request deleted successfully');
                 // Refresh the list in dashboard
                 onDelete?.() || onReject?.();
                 onClose(); // close modal
             } else {
-                alert('Failed to delete request. Please try again.');
+                alert(result.error || 'Failed to delete request. Please try again.');
             }
         } catch (err) {
             console.error('Delete error:', err);
@@ -292,33 +286,40 @@ export default function RequestDetailModal({
                 return;
             }
 
-            const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
-            const newStatus = action === 'reject' ? 'REJECTED' : 'CANCELED';
+            if (action === 'cancel') {
+                const result = await cancelRequestCore({ postData, request: currentRequest });
+                if (!result.success) {
+                    alert(result.error || 'Failed to cancel request');
+                    return;
+                }
+                await refreshRequest();
+                alert('Request canceled successfully!');
+                onCancel?.();
+                return;
+            }
 
+            // reject — not shared with bulk actions (carries approval_remarks),
+            // stays inline here.
+            const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+            const user = JSON.parse(sessionStorage.getItem('user') || '{}');
             const payload = {
                 request_id: currentRequest.request_id,
-                status: newStatus,
+                status: 'REJECTED',
                 updated_at: now,
+                approved_by: user?.id || user?.user_id || 1,
+                approved_at: now,
             };
-
-            if (action === 'reject') {
-                const user = JSON.parse(sessionStorage.getItem('user') || '{}');
-                payload.approved_by = user?.id || user?.user_id || 1;
-                payload.approved_at = now;
-                if (reason) payload.approval_remarks = reason;
-            }
+            if (reason) payload.approval_remarks = reason;
 
             const result = await postData('/api/request-tbl/update.json', payload);
             if (!result?.success) {
-                alert(`Failed to ${action} request`);
+                alert('Failed to reject request');
                 return;
             }
 
             await refreshRequest();
-            alert(`Request ${action}ed successfully!`);
-
-            if (action === 'reject') onReject?.();
-            else if (action === 'cancel') onCancel?.();
+            alert('Request rejected successfully!');
+            onReject?.();
 
         } catch (err) {
             console.error(err);
