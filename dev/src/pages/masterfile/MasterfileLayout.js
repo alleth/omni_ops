@@ -107,7 +107,9 @@ function MasterfileLayout() {
         };
     }, [user?.id]);
 
-    // Route guard for ROO (read-only viewer): block Dashboard & Users by direct URL
+    // Route guard for ROO (read-only viewer): block Dashboard & Users by direct URL.
+    // /masterfile/request-monitoring is open to everyone except ROO (FSE gets
+    // it scoped to just their own requests -- see MasterfileRequestMonitoring).
     useEffect(() => {
         const roleNow = (user?.user_type || 'FSE').toString().trim().toUpperCase();
         if (roleNow === 'ROO') {
@@ -115,9 +117,6 @@ function MasterfileLayout() {
             if (!allowed.includes(location.pathname)) {
                 navigate('/masterfile/inventory', { replace: true });
             }
-        } else if (roleNow === 'FSE' && location.pathname === '/masterfile/request-monitoring') {
-            // SPV/ADM only -- FSE has no cluster/org-wide scope to monitor.
-            navigate('/masterfile/home', { replace: true });
         }
     }, [user, location.pathname, navigate]);
 
@@ -156,6 +155,7 @@ function MasterfileLayout() {
                 ]
                 : [
                     { icon: HiHome, label: "Dashboard", path: "/masterfile/home" },
+                    { icon: HiClipboardCheck, label: "My Requests", path: "/masterfile/request-monitoring" },
                     { icon: HiDeviceMobile, label: "Hardware Inventory", path: "/masterfile/inventory" },
                     { icon: HiClipboardList, label: "Hardware Management", path: "/masterfile/management" },
                     { icon: HiBookOpen, label: "Directory", path: "/masterfile/directory" },

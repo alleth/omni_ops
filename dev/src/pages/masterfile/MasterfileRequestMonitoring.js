@@ -1,9 +1,12 @@
 // src/pages/masterfile/MasterfileRequestMonitoring.js
 //
-// SPV/ADM only. The Dashboard's "Pending Requests" card caps itself at 5 rows
+// SPV/ADM/FSE all land here (never ROO -- they have no request activity of
+// their own to monitor). The Dashboard's request card caps itself at 5 rows
 // (see PENDING_CARD_LIMIT in MasterfileDashboard.js) and links here for the
 // full picture -- every request in scope, not just PENDING ones, with SR
-// Number/SR Date and an expandable-per-request detail view.
+// Number/SR Date and an expandable-per-request detail view. Scope differs by
+// role: SPV sees their cluster, ADM sees everything, FSE sees only their own
+// requests (same requested_by scoping loadRequests() uses on the Dashboard).
 //
 // Laid out as an email inbox (Gmail/Outlook-style split pane) rather than a
 // spreadsheet table, per explicit request: a compact message-style list on
@@ -74,6 +77,8 @@ function MasterfileRequestMonitoring() {
     const user = useMemo(() => JSON.parse(sessionStorage.getItem('user') || '{}'), []);
     const role = (user.user_type || 'FSE').toString().trim().toUpperCase();
     const isSPV = ['SPV', 'SUPERVISOR'].includes(role);
+    const isFSE = role === 'FSE';
+    const userId = user.id || user.user_id;
 
     const [requests, setRequests] = useState([]);
     const [siteMap, setSiteMap] = useState({});
@@ -86,27 +91,36 @@ function MasterfileRequestMonitoring() {
     const [search, setSearch] = useState('');
     const [page, setPage] = useState(1);
     const [selectedId, setSelectedId] = useState(null);
-    // Approve/reject is deliberately NOT reimplemented here -- it reuses the
-    // same RequestDetailModal every other approval entry point uses, so the
-    // hardware side effects (flip to Pullout; for RELOCATION, duplicate the
-    // hardware record at the destination site as On Site -- see
-    // approveRequestCore in utils/requestActions.js) and the "SPV must attach
-    // a newly signed document before approving" rule can't drift between
-    // this page and the Dashboard's modal/bulk-approve.
+    // Approve/reject/cancel/delete are deliberately NOT reimplemented here --
+    // this opens the same RequestDetailModal every other action entry point
+    // uses, so the hardware side effects (flip to Pullout; for RELOCATION,
+    // duplicate the hardware record at the destination site as On Site --
+    // see approveRequestCore in utils/requestActions.js) and the "SPV must
+    // attach a newly signed document before approving" rule can't drift
+    // between this page and the Dashboard's modal/bulk-approve.
     const [isApprovalModalOpen, setIsApprovalModalOpen] = useState(false);
 
     const load = useCallback(async () => {
         setLoading(true);
-        // Scoped the same way the Dashboard's own request list is: SPV sees
-        // their cluster, ADM sees everything. Every status is fetched here
-        // (not just PENDING) since this page is meant for monitoring
-        // everything that's been requested, approved, rejected, or canceled.
-        const clusterQuery = isSPV ? `?cluster_name=${encodeURIComponent(user.cluster_name || '')}` : '';
+        // Scoped the same way the Dashboard's own request list is: FSE sees
+        // only their own requests, SPV sees their cluster, ADM sees
+        // everything. Every status is fetched here (not just PENDING) since
+        // this page is meant for monitoring everything that's been
+        // requested, approved, rejected, or canceled, not just an approval
+        // queue.
+        let requestQuery = '';
+        if (isFSE) requestQuery = `?requested_by=${userId}`;
+        else if (isSPV) requestQuery = `?cluster_name=${encodeURIComponent(user.cluster_name || '')}`;
+        // Approver-name lookups: FSE's own requests can only ever have been
+        // decided by someone in their cluster, so cluster-scoping this too
+        // keeps it lean without missing anyone.
+        const userQuery = (isSPV || isFSE) ? `?cluster_name=${encodeURIComponent(user.cluster_name || '')}` : '';
+
         const [reqRes, siteRes, regionRes, userRes] = await Promise.all([
-            fetchRef.current(`/api/request-tbl.json${clusterQuery}`),
+            fetchRef.current(`/api/request-tbl.json${requestQuery}`),
             fetchRef.current('/api/site-list-tbl.json'),
             fetchRef.current('/api/region-tbl.json'),
-            fetchRef.current(`/api/user-tbl.json${clusterQuery}`),
+            fetchRef.current(`/api/user-tbl.json${userQuery}`),
         ]);
 
         const list = reqRes?.requests || [];
@@ -125,7 +139,7 @@ function MasterfileRequestMonitoring() {
         setUserMap(uMap);
 
         setLoading(false);
-    }, [isSPV, user.cluster_name]);
+    }, [isSPV, isFSE, userId, user.cluster_name]);
 
     useEffect(() => { load(); }, [load]);
 
@@ -212,9 +226,13 @@ function MasterfileRequestMonitoring() {
         <div className="p-5 pb-16">
             <div className="max-w-6xl mx-auto space-y-4">
                 <div>
-                    <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Request Monitoring</h1>
+                    <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
+                        {isFSE ? 'My Requests' : 'Request Monitoring'}
+                    </h1>
                     <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-                        Every hardware request in your scope — pull-outs and relocations, all statuses.
+                        {isFSE
+                            ? 'Every hardware request you\'ve submitted — pull-outs and relocations, all statuses.'
+                            : 'Every hardware request in your scope — pull-outs and relocations, all statuses.'}
                     </p>
                 </div>
 
@@ -401,16 +419,25 @@ function MasterfileRequestMonitoring() {
                                     <StatusBadge status={selected.status} />
                                 </div>
 
-                                {isSPV && (selected.status || 'PENDING').toUpperCase() === 'PENDING' && (
-                                    <div className="flex gap-3 pt-4">
-                                        <button
-                                            onClick={() => setIsApprovalModalOpen(true)}
-                                            className="px-4 py-2 text-sm font-medium bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors"
-                                        >
-                                            Review to Approve / Reject
-                                        </button>
-                                    </div>
-                                )}
+                                {(() => {
+                                    const s = (selected.status || 'PENDING').toUpperCase();
+                                    // SPV: approve/reject any PENDING request in their cluster.
+                                    // FSE: manage only their own request -- cancel while PENDING,
+                                    // delete once REJECTED -- exactly what RequestDetailModal
+                                    // already allows them to do elsewhere in the app.
+                                    const canManage = (isSPV && s === 'PENDING') || (isFSE && ['PENDING', 'REJECTED'].includes(s));
+                                    if (!canManage) return null;
+                                    return (
+                                        <div className="flex gap-3 pt-4">
+                                            <button
+                                                onClick={() => setIsApprovalModalOpen(true)}
+                                                className="px-4 py-2 text-sm font-medium bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors"
+                                            >
+                                                {isSPV ? 'Review to Approve / Reject' : 'Manage Request'}
+                                            </button>
+                                        </div>
+                                    );
+                                })()}
 
                                 <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-4 pt-5">
                                     <Field label="Asset #" value={selected.asset_num} mono />

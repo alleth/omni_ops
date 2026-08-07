@@ -4,9 +4,10 @@ import { useApi } from '../../hooks/useApi';
 import RequestDetailModal from './components/RequestDetailModal';
 import { approveRequestCore, cancelRequestCore, deleteRequestCore } from '../../utils/requestActions';
 
-// SPV/ADM's "Pending Requests" card only shows this many rows inline before
-// handing off to the full /masterfile/request-monitoring page -- with no cap
-// it just kept growing with every new pending request org/cluster-wide.
+// The request card only shows this many rows inline before handing off to
+// the full /masterfile/request-monitoring page -- with no cap it just kept
+// growing with every new request in scope (org/cluster-wide for SPV/ADM;
+// every non-canceled request they've ever submitted for FSE).
 const PENDING_CARD_LIMIT = 5;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -567,9 +568,7 @@ function MasterfileDashboard() {
     const pendingSelectedCount = requests.filter(r => selectedIds.includes(r.request_id) && r.status?.toUpperCase() === 'PENDING').length;
     const rejectedSelectedCount = requests.filter(r => selectedIds.includes(r.request_id) && r.status?.toUpperCase() === 'REJECTED').length;
 
-    // SPV/ADM only -- FSE's own request list is naturally short (their own
-    // requests only), so it doesn't need the same cap.
-    const visibleRequests = isFSE ? requests : requests.slice(0, PENDING_CARD_LIMIT);
+    const visibleRequests = requests.slice(0, PENDING_CARD_LIMIT);
 
     // ── Render ────────────────────────────────────────────────────────────────
     return (
@@ -967,12 +966,12 @@ function MasterfileDashboard() {
                         </div>
                     )}
 
-                    {!isFSE && !requestLoading && requests.length > PENDING_CARD_LIMIT && (
+                    {!requestLoading && requests.length > PENDING_CARD_LIMIT && (
                         <button
                             onClick={() => navigate('/masterfile/request-monitoring')}
                             className="w-full flex items-center justify-center gap-1.5 text-sm font-medium text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 py-3 border-t border-gray-100 dark:border-gray-800 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
                         >
-                            View all {requests.length} pending requests
+                            View all {requests.length} {isFSE ? 'requests' : 'pending requests'}
                             <Icon d="M9 5l7 7-7 7" className="w-3.5 h-3.5" />
                         </button>
                     )}
