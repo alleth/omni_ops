@@ -15,6 +15,7 @@ import MasterfileUsers from './pages/masterfile/MasterfileUsers';
 import MasterfileManagement from './pages/masterfile/MasterfileHardwareManagement';
 import MasterfileProfile from './pages/masterfile/MasterfileProfile';
 import MasterfileReports from './pages/masterfile/MasterfileReports';
+import MasterfileRequestMonitoring from './pages/masterfile/MasterfileRequestMonitoring';
 
 function App() {
     return (
@@ -33,6 +34,7 @@ function App() {
                     <Route path="/masterfile/users" element={<MasterfileUsers />} />
                     <Route path="/masterfile/management" element={<MasterfileManagement />} />
                     <Route path="/masterfile/reports" element={<MasterfileReports />} />
+                    <Route path="/masterfile/request-monitoring" element={<MasterfileRequestMonitoring />} />
                     <Route path="/masterfile/profile" element={<MasterfileProfile />} />
                 </Route>
 

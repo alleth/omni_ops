@@ -1,7 +1,13 @@
 import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useApi } from '../../hooks/useApi';
 import RequestDetailModal from './components/RequestDetailModal';
 import { approveRequestCore, cancelRequestCore, deleteRequestCore } from '../../utils/requestActions';
+
+// SPV/ADM's "Pending Requests" card only shows this many rows inline before
+// handing off to the full /masterfile/request-monitoring page -- with no cap
+// it just kept growing with every new pending request org/cluster-wide.
+const PENDING_CARD_LIMIT = 5;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const PLACEHOLDERS = new Set([
@@ -100,6 +106,7 @@ const Icon = ({ d, className = 'w-3.5 h-3.5' }) => (
 
 // ── Main Component ────────────────────────────────────────────────────────────
 function MasterfileDashboard() {
+    const navigate = useNavigate();
     const [hardware, setHardware] = useState([]);
     const [sites, setSites] = useState([]);
     const [allRequests, setAllRequests] = useState([]);
@@ -560,6 +567,10 @@ function MasterfileDashboard() {
     const pendingSelectedCount = requests.filter(r => selectedIds.includes(r.request_id) && r.status?.toUpperCase() === 'PENDING').length;
     const rejectedSelectedCount = requests.filter(r => selectedIds.includes(r.request_id) && r.status?.toUpperCase() === 'REJECTED').length;
 
+    // SPV/ADM only -- FSE's own request list is naturally short (their own
+    // requests only), so it doesn't need the same cap.
+    const visibleRequests = isFSE ? requests : requests.slice(0, PENDING_CARD_LIMIT);
+
     // ── Render ────────────────────────────────────────────────────────────────
     return (
         <div className="p-5 pb-16">
@@ -921,7 +932,7 @@ function MasterfileDashboard() {
                                     </tr>
                                 </thead>
                                 <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-100 dark:divide-gray-800">
-                                    {requests.map(req => {
+                                    {visibleRequests.map(req => {
                                         const selectable = !isFSE || ['PENDING', 'REJECTED'].includes(req.status?.toUpperCase());
                                         return (
                                             <tr key={req.request_id}
@@ -954,6 +965,16 @@ function MasterfileDashboard() {
                                 </tbody>
                             </table>
                         </div>
+                    )}
+
+                    {!isFSE && !requestLoading && requests.length > PENDING_CARD_LIMIT && (
+                        <button
+                            onClick={() => navigate('/masterfile/request-monitoring')}
+                            className="w-full flex items-center justify-center gap-1.5 text-sm font-medium text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 py-3 border-t border-gray-100 dark:border-gray-800 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+                        >
+                            View all {requests.length} pending requests
+                            <Icon d="M9 5l7 7-7 7" className="w-3.5 h-3.5" />
+                        </button>
                     )}
                 </div>
 

@@ -7,6 +7,7 @@ import {
     HiHome,
     HiDeviceMobile,
     HiClipboardList,
+    HiClipboardCheck,
     HiBookOpen,
     HiDocumentReport,
     HiUser,
@@ -114,6 +115,9 @@ function MasterfileLayout() {
             if (!allowed.includes(location.pathname)) {
                 navigate('/masterfile/inventory', { replace: true });
             }
+        } else if (roleNow === 'FSE' && location.pathname === '/masterfile/request-monitoring') {
+            // SPV/ADM only -- FSE has no cluster/org-wide scope to monitor.
+            navigate('/masterfile/home', { replace: true });
         }
     }, [user, location.pathname, navigate]);
 
@@ -127,6 +131,7 @@ function MasterfileLayout() {
     const menuItems = ['ADM', 'ADMIN', 'ADMINISTRATOR'].includes(role)
         ? [
             { icon: HiHome, label: "Dashboard", path: "/masterfile/home" },
+            { icon: HiClipboardCheck, label: "Request Monitoring", path: "/masterfile/request-monitoring" },
             { icon: HiDeviceMobile, label: "Hardware Inventory", path: "/masterfile/inventory" },
             { icon: HiClipboardList, label: "Hardware Management", path: "/masterfile/management" },
             { icon: HiBookOpen, label: "Directory", path: "/masterfile/directory" },
@@ -135,6 +140,7 @@ function MasterfileLayout() {
         : ['SPV', 'SUPERVISOR'].includes(role)
             ? [
                 { icon: HiHome, label: "Dashboard", path: "/masterfile/home" },
+                { icon: HiClipboardCheck, label: "Request Monitoring", path: "/masterfile/request-monitoring" },
                 { icon: HiDeviceMobile, label: "Hardware Inventory", path: "/masterfile/inventory" },
                 { icon: HiClipboardList, label: "Hardware Management", path: "/masterfile/management" },
                 { icon: HiBookOpen, label: "Directory", path: "/masterfile/directory" },
