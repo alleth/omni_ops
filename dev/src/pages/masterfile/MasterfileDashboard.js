@@ -139,10 +139,22 @@ function MasterfileDashboard() {
         didLoad.current = true;
 
         const load = async () => {
+            // Scoped the same way loadRequests() below scopes the "My Hardware
+            // Requests" table -- this was previously always the bare, unscoped
+            // '/api/request-tbl.json', so pullOutMetrics/requestMetrics (and by
+            // extension the "Recent Pull-Out Requests" card) were built from
+            // every user's requests org-wide regardless of role, not just the
+            // current user's/cluster's. Unlike loadRequests(), this fetch needs
+            // every status (not just PENDING for SPV) since these metrics cover
+            // approved/rejected/canceled too.
+            let requestQuery = '';
+            if (isFSE) requestQuery = `?requested_by=${userId}`;
+            else if (isSPV) requestQuery = `?cluster_name=${encodeURIComponent(user.cluster_name || '')}`;
+
             const results = await fetchManyRef.current(
                 '/api/hw-tbl.json',
                 '/api/site-list-tbl.json',
-                '/api/request-tbl.json'
+                `/api/request-tbl.json${requestQuery}`
             );
             if (!results) { setDataLoading(false); return; }
 
@@ -165,7 +177,7 @@ function MasterfileDashboard() {
         };
 
         load();
-    }, [isFSE, assignedRegionIds]);
+    }, [isFSE, isSPV, userId, user.cluster_name, assignedRegionIds]);
 
     // ── Role-filtered requests for table ──────────────────────────────────────
     const loadRequests = useCallback(async () => {
