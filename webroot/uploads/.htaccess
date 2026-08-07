@@ -1,0 +1,9 @@
+# .jfif is a JPEG under the hood, but XAMPP's default Apache mime.types
+# doesn't map the extension to image/jpeg (only jpeg/jpg/jpe) -- without this,
+# Apache serves .jfif attachments as application/octet-stream, which some
+# browsers force-download instead of rendering, breaking "Open in New Tab"
+# for pull-out/relocation form uploads. Requires mod_mime, already enabled
+# in this project's XAMPP setup.
+<IfModule mod_mime.c>
+    AddType image/jpeg .jfif
+</IfModule>

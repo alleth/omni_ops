@@ -114,7 +114,11 @@ export default function RequestDetailModal({
         const attachmentPath = currentRequest.attachment_path;
         const hasAttachment = attachmentPath && typeof attachmentPath === 'string' && attachmentPath.trim() !== '';
         const fileExtension = hasAttachment ? attachmentPath.split('.').pop()?.toLowerCase() : '';
-        const isImage = hasAttachment && ['jpg', 'jpeg', 'png'].includes(fileExtension);
+        // .jfif is a JPEG under the hood (same binary format, browsers render it
+        // fine via <img>) -- the server accepts it since it uploads as MIME type
+        // image/jpeg, so it needs to be recognized here too or it falls through
+        // to the no-preview/no-download dead end below.
+        const isImage = hasAttachment && ['jpg', 'jpeg', 'jfif', 'png'].includes(fileExtension);
 
         if (!hasAttachment || !isImage || imageLoaded) return;
 
@@ -233,7 +237,8 @@ export default function RequestDetailModal({
         fileExtension = newAttachment.name.split('.').pop()?.toLowerCase() || '';
     }
     const isPdf = fileExtension === 'pdf';
-    const isImage = ['jpg', 'jpeg', 'png'].includes(fileExtension);
+    // .jfif is a JPEG under the hood -- see the loading-progress effect above.
+    const isImage = ['jpg', 'jpeg', 'jfif', 'png'].includes(fileExtension);
 
     // Download current attachment
     const handleDownload = () => {
@@ -472,11 +477,27 @@ export default function RequestDetailModal({
                                             </a>
                                         </div>
                                     ) : (
+                                        // Any allowed type not recognized as an image/PDF above still
+                                        // needs a way out -- without this link there was no way to
+                                        // view or download the file at all (this is how the .jfif
+                                        // report happened: not matched as an image, and this branch
+                                        // had no link, just a static "not available" message).
                                         <div className="text-center p-6 space-y-4">
                                             <div className="text-gray-600 dark:text-gray-400">
                                                 <p className="text-lg font-medium mb-2">File ({fileExtension.toUpperCase()})</p>
                                                 <p className="text-sm">Inline preview not available</p>
                                             </div>
+                                            <a
+                                                href={originalAttachmentUrl}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="inline-flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors"
+                                            >
+                                                <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L9 15" />
+                                                </svg>
+                                                Open File in New Tab
+                                            </a>
                                         </div>
                                     )
                                 ) : (
