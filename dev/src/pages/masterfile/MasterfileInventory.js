@@ -455,39 +455,65 @@ const HardwareDetailModal = ({ item, request, siteMap, regionMap, onClose, onAtt
     const [imgPreviewUrl, setImgPreviewUrl] = useState(null);
     const fileInputRef = useRef(null);
 
-    // ── Tracking number (viewable even when empty; editable when a request exists) ──
-    const [localTracking, setLocalTracking] = useState(request?.tracking_num || '');
-    const [editingTracking, setEditingTracking] = useState(false);
-    const [trackingInput, setTrackingInput] = useState('');
-    const [trackingSaving, setTrackingSaving] = useState(false);
-    const [trackingError, setTrackingError] = useState('');
+    // ── Tracking No. / SR Number / SR Date / Return Date — viewable even when
+    // empty, editable together (when a request exists and the viewer isn't
+    // read-only) so FSE can fill these in from the Pull Out list, not just
+    // from the Dashboard's request modal. ──
+    const [localDetails, setLocalDetails] = useState({
+        tracking_num: request?.tracking_num || '',
+        sr_num: request?.sr_num || '',
+        sr_date: request?.sr_date || '',
+        return_date: request?.return_date || '',
+    });
+    const [editingDetails, setEditingDetails] = useState(false);
+    const [detailsForm, setDetailsForm] = useState({ tracking_num: '', sr_num: '', sr_date: '', return_date: '' });
+    const [detailsSaving, setDetailsSaving] = useState(false);
+    const [detailsError, setDetailsError] = useState('');
 
     useEffect(() => {
-        setLocalTracking(request?.tracking_num || '');
-        setEditingTracking(false);
-        setTrackingError('');
-    }, [request?.request_id, request?.tracking_num]);
+        setLocalDetails({
+            tracking_num: request?.tracking_num || '',
+            sr_num: request?.sr_num || '',
+            sr_date: request?.sr_date || '',
+            return_date: request?.return_date || '',
+        });
+        setEditingDetails(false);
+        setDetailsError('');
+    }, [request?.request_id, request?.tracking_num, request?.sr_num, request?.sr_date, request?.return_date]);
 
-    const handleSaveTracking = async () => {
+    const startEditingDetails = () => {
+        setDetailsForm({ ...localDetails });
+        setDetailsError('');
+        setEditingDetails(true);
+    };
+
+    const handleSaveDetails = async () => {
         if (!request?.request_id) return;
-        setTrackingSaving(true);
-        setTrackingError('');
+        setDetailsSaving(true);
+        setDetailsError('');
         try {
+            const trackingNum = detailsForm.tracking_num.trim();
+            // sr_num is validated server-side as an integer (RequestTblTable),
+            // matching how BulkRequestModal sends it on request creation.
+            const srNum = detailsForm.sr_num !== '' ? Number(detailsForm.sr_num) : null;
             const res = await postData('/api/request-tbl/update.json', {
                 request_id: request.request_id,
-                tracking_num: trackingInput.trim(),
+                tracking_num: trackingNum,
+                sr_num: srNum,
+                sr_date: detailsForm.sr_date || null,
+                return_date: detailsForm.return_date || null,
             });
             if (res?.success) {
-                setLocalTracking(trackingInput.trim());
-                setEditingTracking(false);
+                setLocalDetails({ tracking_num: trackingNum, sr_num: srNum ?? '', sr_date: detailsForm.sr_date, return_date: detailsForm.return_date });
+                setEditingDetails(false);
                 onRequestUpdated?.();
             } else {
-                setTrackingError(res?.message || 'Failed to save tracking number.');
+                setDetailsError(res?.message || 'Failed to save changes.');
             }
         } catch (err) {
-            setTrackingError('Failed to save tracking number.');
+            setDetailsError('Failed to save changes.');
         } finally {
-            setTrackingSaving(false);
+            setDetailsSaving(false);
         }
     };
 
@@ -786,52 +812,98 @@ const HardwareDetailModal = ({ item, request, siteMap, regionMap, onClose, onAtt
                                     )}
                                     {request.delivered_by && <DetailField label="Delivered By" value={request.delivered_by} />}
                                     {request.pickup_date && <DetailField label="Pickup Date" value={request.pickup_date} />}
-                                    {request.return_date && <DetailField label="Return Date" value={request.return_date} />}
+                                </div>
 
-                                    {/* Tracking No. — always shown; can be added/edited when not read-only */}
-                                    <div className="col-span-2">
-                                        <p className="text-xs text-gray-400 dark:text-gray-500 mb-0.5">Tracking No.</p>
-                                        {editingTracking ? (
+                                {/* Tracking No. / SR Number / SR Date / Return Date — always shown
+                                    (even when empty), editable together when not read-only */}
+                                <div className="pt-1">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <p className="text-xs text-gray-400 dark:text-gray-500">Tracking / SR Info</p>
+                                        {!readOnly && request?.request_id && !editingDetails && (
+                                            <button
+                                                onClick={startEditingDetails}
+                                                className="text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300"
+                                            >
+                                                Edit
+                                            </button>
+                                        )}
+                                    </div>
+
+                                    {editingDetails ? (
+                                        <div className="space-y-3">
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div>
+                                                    <label className="text-xs text-gray-400 dark:text-gray-500 block mb-1">Tracking No.</label>
+                                                    <input type="text" value={detailsForm.tracking_num}
+                                                        onChange={e => setDetailsForm(f => ({ ...f, tracking_num: e.target.value }))}
+                                                        placeholder="Enter tracking number"
+                                                        className="w-full px-3 py-1.5 text-sm font-mono rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none" />
+                                                </div>
+                                                <div>
+                                                    <label className="text-xs text-gray-400 dark:text-gray-500 block mb-1">SR Number</label>
+                                                    <input type="number" value={detailsForm.sr_num}
+                                                        onChange={e => setDetailsForm(f => ({ ...f, sr_num: e.target.value }))}
+                                                        className="w-full px-3 py-1.5 text-sm rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none" />
+                                                </div>
+                                                <div>
+                                                    <label className="text-xs text-gray-400 dark:text-gray-500 block mb-1">SR Date</label>
+                                                    <input type="date" value={detailsForm.sr_date}
+                                                        onChange={e => setDetailsForm(f => ({ ...f, sr_date: e.target.value }))}
+                                                        className="w-full px-3 py-1.5 text-sm rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none" />
+                                                </div>
+                                                <div>
+                                                    <label className="text-xs text-gray-400 dark:text-gray-500 block mb-1">Return Date</label>
+                                                    <input type="date" value={detailsForm.return_date}
+                                                        onChange={e => setDetailsForm(f => ({ ...f, return_date: e.target.value }))}
+                                                        className="w-full px-3 py-1.5 text-sm rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none" />
+                                                </div>
+                                            </div>
+                                            {detailsError && <p className="text-xs text-red-500">{detailsError}</p>}
                                             <div className="flex items-center gap-2">
-                                                <input
-                                                    type="text"
-                                                    value={trackingInput}
-                                                    onChange={e => setTrackingInput(e.target.value)}
-                                                    placeholder="Enter tracking number"
-                                                    className="flex-1 px-3 py-1.5 text-sm font-mono rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none"
-                                                />
                                                 <button
-                                                    onClick={handleSaveTracking}
-                                                    disabled={trackingSaving}
+                                                    onClick={handleSaveDetails}
+                                                    disabled={detailsSaving}
                                                     className="px-3 py-1.5 text-xs font-medium bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-md transition-colors"
                                                 >
-                                                    {trackingSaving ? 'Saving…' : 'Save'}
+                                                    {detailsSaving ? 'Saving…' : 'Save'}
                                                 </button>
                                                 <button
-                                                    onClick={() => { setEditingTracking(false); setTrackingError(''); }}
-                                                    disabled={trackingSaving}
+                                                    onClick={() => { setEditingDetails(false); setDetailsError(''); }}
+                                                    disabled={detailsSaving}
                                                     className="px-3 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-md transition-colors"
                                                 >
                                                     Cancel
                                                 </button>
                                             </div>
-                                        ) : (
-                                            <div className="flex items-center gap-3">
-                                                <p className={`text-sm font-medium font-mono ${localTracking ? 'text-gray-800 dark:text-gray-100' : 'text-gray-400 dark:text-gray-600'}`}>
-                                                    {localTracking || '—'}
+                                        </div>
+                                    ) : (
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div>
+                                                <p className="text-xs text-gray-400 dark:text-gray-500 mb-0.5">Tracking No.</p>
+                                                <p className={`text-sm font-medium font-mono ${localDetails.tracking_num ? 'text-gray-800 dark:text-gray-100' : 'text-gray-400 dark:text-gray-600'}`}>
+                                                    {localDetails.tracking_num || '—'}
                                                 </p>
-                                                {!readOnly && request?.request_id && (
-                                                    <button
-                                                        onClick={() => { setTrackingInput(localTracking); setEditingTracking(true); setTrackingError(''); }}
-                                                        className="text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300"
-                                                    >
-                                                        {localTracking ? 'Edit' : 'Add tracking number'}
-                                                    </button>
-                                                )}
                                             </div>
-                                        )}
-                                        {trackingError && <p className="text-xs text-red-500 mt-1">{trackingError}</p>}
-                                    </div>
+                                            <div>
+                                                <p className="text-xs text-gray-400 dark:text-gray-500 mb-0.5">SR Number</p>
+                                                <p className={`text-sm font-medium ${localDetails.sr_num ? 'text-gray-800 dark:text-gray-100' : 'text-gray-400 dark:text-gray-600'}`}>
+                                                    {localDetails.sr_num || '—'}
+                                                </p>
+                                            </div>
+                                            <div>
+                                                <p className="text-xs text-gray-400 dark:text-gray-500 mb-0.5">SR Date</p>
+                                                <p className={`text-sm font-medium ${localDetails.sr_date ? 'text-gray-800 dark:text-gray-100' : 'text-gray-400 dark:text-gray-600'}`}>
+                                                    {localDetails.sr_date || '—'}
+                                                </p>
+                                            </div>
+                                            <div>
+                                                <p className="text-xs text-gray-400 dark:text-gray-500 mb-0.5">Return Date</p>
+                                                <p className={`text-sm font-medium ${localDetails.return_date ? 'text-gray-800 dark:text-gray-100' : 'text-gray-400 dark:text-gray-600'}`}>
+                                                    {localDetails.return_date || '—'}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                                 {request.remarks && (
                                     <div>
