@@ -206,7 +206,10 @@ class RequestTblController extends AppController
             $requestTbl = $this->RequestTbl->newEntity($entityData);
 
             if ($this->RequestTbl->save($requestTbl)) {
-                $savedIds[] = $requestTbl->id;
+                // Not ->id -- the primary key column is request_id, not id, so
+                // ->id was always null here (harmless so far since no caller
+                // reads the response's `ids`, but worth being correct).
+                $savedIds[] = $requestTbl->request_id;
             } else {
                 $errors[] = $requestTbl->getErrors();
             }

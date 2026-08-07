@@ -119,7 +119,14 @@ class RequestTblTable extends Table
             ->scalar('attachment_path')
             ->maxLength('attachment_path', 455)
     //      ->requirePresence('attachment_path', 'create')
-            ->notEmptyString('attachment_path');
+            // Allowed empty on create: legacy pull-outs (predating this system's
+            // request tracking) can now get a minimal PENDING request created
+            // just to hold SR#/tracking# details, with no form attached yet --
+            // see HardwareDetailModal's "Add details" path. The normal creation
+            // flows (BulkRequestModal, and the existing attach-a-form-to-legacy-
+            // hardware path) already require a file client-side before they'll
+            // submit, so this doesn't loosen anything for them.
+            ->allowEmptyString('attachment_path');
 
         $validator
             ->integer('sr_num')

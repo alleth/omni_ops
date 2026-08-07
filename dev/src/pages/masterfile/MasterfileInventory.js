@@ -488,7 +488,6 @@ const HardwareDetailModal = ({ item, request, siteMap, regionMap, onClose, onAtt
     };
 
     const handleSaveDetails = async () => {
-        if (!request?.request_id) return;
         setDetailsSaving(true);
         setDetailsError('');
         try {
@@ -496,15 +495,48 @@ const HardwareDetailModal = ({ item, request, siteMap, regionMap, onClose, onAtt
             // sr_num is validated server-side as an integer (RequestTblTable),
             // matching how BulkRequestModal sends it on request creation.
             const srNum = detailsForm.sr_num !== '' ? Number(detailsForm.sr_num) : null;
-            const res = await postData('/api/request-tbl/update.json', {
-                request_id: request.request_id,
-                tracking_num: trackingNum,
-                sr_num: srNum,
-                sr_date: detailsForm.sr_date || null,
-                return_date: detailsForm.return_date || null,
-            });
+            const srDate = detailsForm.sr_date || null;
+            const returnDate = detailsForm.return_date || null;
+
+            let res;
+            if (request?.request_id) {
+                res = await postData('/api/request-tbl/update.json', {
+                    request_id: request.request_id,
+                    tracking_num: trackingNum,
+                    sr_num: srNum,
+                    sr_date: srDate,
+                    return_date: returnDate,
+                });
+            } else {
+                // No pull-out request on file at all -- this is hardware pulled
+                // out under the previous system, which never created one. Create
+                // a minimal PENDING request just to hold these details; a form
+                // can still be attached separately afterward (or never, if none
+                // exists). attachment_path is allowed empty on create specifically
+                // for this path -- see RequestTblTable. '/add' (not the bare
+                // path) is what actually reaches add() -- see the note on the
+                // attachment-upload branch of handleSubmit above.
+                res = await postData('/api/request-tbl/add.json', {
+                    hw_id: item.hw_id,
+                    request_type: 'PULL_OUT',
+                    requested_by: user?.id || user?.user_id || 1,
+                    status: 'PENDING',
+                    site_code: item.site_code || null,
+                    asset_num: item.hw_asset_num || null,
+                    serial_num: item.hw_serial_num || null,
+                    item_desc: item.item_desc || null,
+                    hw_brand_name: item.hw_brand_name || null,
+                    hw_model: item.hw_model || null,
+                    quantity: 1,
+                    tracking_num: trackingNum,
+                    sr_num: srNum,
+                    sr_date: srDate,
+                    return_date: returnDate,
+                });
+            }
+
             if (res?.success) {
-                setLocalDetails({ tracking_num: trackingNum, sr_num: srNum ?? '', sr_date: detailsForm.sr_date, return_date: detailsForm.return_date });
+                setLocalDetails({ tracking_num: trackingNum, sr_num: srNum ?? '', sr_date: srDate || '', return_date: returnDate || '' });
                 setEditingDetails(false);
                 onRequestUpdated?.();
             } else {
@@ -585,7 +617,11 @@ const HardwareDetailModal = ({ item, request, siteMap, regionMap, onClose, onAtt
                 const fd = new FormData();
                 fd.append('data', JSON.stringify(payload));
                 fd.append('attachment', attachFile);
-                result = await postFormData('/api/request-tbl.json', fd);
+                // NOT '/api/request-tbl.json' (bare) -- routes.php's fallbacks()
+                // sends the bare path to index() (GET-only) regardless of HTTP
+                // method, so POSTing there 405s. '/add' is what actually reaches
+                // add(), matching how BulkRequestModal creates requests.
+                result = await postFormData('/api/request-tbl/add.json', fd);
             }
 
             if (result?.success) {
@@ -794,37 +830,51 @@ const HardwareDetailModal = ({ item, request, siteMap, regionMap, onClose, onAtt
                         )}
                     </div>
 
-                    {/* Request details (if any) */}
-                    {request && (
+                    {/* Request details -- the Tracking/SR Info block below is shown even when
+                        no request row exists yet (legacy hardware pulled out under the
+                        previous system, which never created one); everything else here is
+                        request-specific and stays gated on `request`. */}
+                    {(request || !readOnly) && (
                         <div>
                             <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-3">Request Details</p>
                             <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-4 space-y-3">
-                                <div className="flex items-center justify-between">
-                                    <span className="text-xs text-gray-500 dark:text-gray-400">Request #{request.request_id}</span>
-                                    <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">
-                                        {(request.status || 'PENDING').toUpperCase()}
-                                    </span>
-                                </div>
-                                <div className="grid grid-cols-2 gap-3">
-                                    <DetailField label="Submitted" value={request.created_at ? new Date(request.created_at).toLocaleDateString() : null} />
-                                    {request.delivery_method && (
-                                        <DetailField label="Delivery" value={request.delivery_method === 'courier' ? 'Courier' : 'Personal Pickup'} />
-                                    )}
-                                    {request.delivered_by && <DetailField label="Delivered By" value={request.delivered_by} />}
-                                    {request.pickup_date && <DetailField label="Pickup Date" value={request.pickup_date} />}
-                                </div>
+                                {request && (
+                                    <>
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-xs text-gray-500 dark:text-gray-400">Request #{request.request_id}</span>
+                                            <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">
+                                                {(request.status || 'PENDING').toUpperCase()}
+                                            </span>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <DetailField label="Submitted" value={request.created_at ? new Date(request.created_at).toLocaleDateString() : null} />
+                                            {request.delivery_method && (
+                                                <DetailField label="Delivery" value={request.delivery_method === 'courier' ? 'Courier' : 'Personal Pickup'} />
+                                            )}
+                                            {request.delivered_by && <DetailField label="Delivered By" value={request.delivered_by} />}
+                                            {request.pickup_date && <DetailField label="Pickup Date" value={request.pickup_date} />}
+                                        </div>
+                                    </>
+                                )}
+
+                                {!request && !readOnly && (
+                                    <p className="text-xs text-gray-400 dark:text-gray-500">
+                                        No pull-out request on file for this hardware yet -- add SR/tracking details below if you have them.
+                                    </p>
+                                )}
 
                                 {/* Tracking No. / SR Number / SR Date / Return Date — always shown
-                                    (even when empty), editable together when not read-only */}
+                                    (even when empty, and even with no request on file yet),
+                                    editable together when not read-only */}
                                 <div className="pt-1">
                                     <div className="flex items-center justify-between mb-2">
                                         <p className="text-xs text-gray-400 dark:text-gray-500">Tracking / SR Info</p>
-                                        {!readOnly && request?.request_id && !editingDetails && (
+                                        {!readOnly && !editingDetails && (
                                             <button
                                                 onClick={startEditingDetails}
                                                 className="text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300"
                                             >
-                                                Edit
+                                                {request?.request_id ? 'Edit' : 'Add details'}
                                             </button>
                                         )}
                                     </div>
@@ -905,7 +955,7 @@ const HardwareDetailModal = ({ item, request, siteMap, regionMap, onClose, onAtt
                                         </div>
                                     )}
                                 </div>
-                                {request.remarks && (
+                                {request?.remarks && (
                                     <div>
                                         <p className="text-xs text-gray-400 dark:text-gray-500 mb-0.5">Remarks</p>
                                         <p className="text-sm text-gray-700 dark:text-gray-300">{request.remarks}</p>
