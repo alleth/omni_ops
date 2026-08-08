@@ -1572,17 +1572,28 @@ function MasterfileInventory() {
 
                 const activeStatuses = ['On Site', 'Active', 'Installed'];
 
-                const duplicateAsset = existingHw.find(item =>
-                    item.hw_id !== editHardware?.hw_id &&
-                    item.hw_asset_num?.trim() === newAssetNum &&
-                    activeStatuses.includes(item.hw_status?.trim())
-                );
+                // Each field is only checked when IT ITSELF is a real value --
+                // the outer `if` above only gates whether to bother running a
+                // check at all (true if EITHER field is real), so without this,
+                // a placeholder like "N/A" on one field still got looked up
+                // against existing records whenever the OTHER field was real,
+                // and since many On Site units legitimately share "N/A" as
+                // their asset number, that always found a "duplicate."
+                const duplicateAsset = (newAssetNum && !placeholders.includes(newAssetNum))
+                    ? existingHw.find(item =>
+                        item.hw_id !== editHardware?.hw_id &&
+                        item.hw_asset_num?.trim() === newAssetNum &&
+                        activeStatuses.includes(item.hw_status?.trim())
+                    )
+                    : null;
 
-                const duplicateSerial = existingHw.find(item =>
-                    item.hw_id !== editHardware?.hw_id &&
-                    item.hw_serial_num?.trim() === newSerialNum &&
-                    activeStatuses.includes(item.hw_status?.trim())
-                );
+                const duplicateSerial = (newSerialNum && !placeholders.includes(newSerialNum))
+                    ? existingHw.find(item =>
+                        item.hw_id !== editHardware?.hw_id &&
+                        item.hw_serial_num?.trim() === newSerialNum &&
+                        activeStatuses.includes(item.hw_status?.trim())
+                    )
+                    : null;
 
                 if (duplicateAsset || duplicateSerial) {
                     hasDuplicate = true;
@@ -1683,17 +1694,24 @@ function MasterfileInventory() {
 
                 const activeStatuses = ['On Site', 'Active', 'Installed'];
 
-                const duplicateAsset = existingHw.find(item =>
-                    item.hw_id !== editHardware.hw_id &&
-                    item.hw_asset_num?.trim() === newAssetNum &&
-                    activeStatuses.includes(item.hw_status?.trim())
-                );
+                // Each field is only checked when IT ITSELF is a real value --
+                // see the matching comment in handleAddHardwareSubmit for why
+                // this can't just gate on the outer `if` above.
+                const duplicateAsset = (newAssetNum && !placeholders.includes(newAssetNum))
+                    ? existingHw.find(item =>
+                        item.hw_id !== editHardware.hw_id &&
+                        item.hw_asset_num?.trim() === newAssetNum &&
+                        activeStatuses.includes(item.hw_status?.trim())
+                    )
+                    : null;
 
-                const duplicateSerial = existingHw.find(item =>
-                    item.hw_id !== editHardware.hw_id &&
-                    item.hw_serial_num?.trim() === newSerialNum &&
-                    activeStatuses.includes(item.hw_status?.trim())
-                );
+                const duplicateSerial = (newSerialNum && !placeholders.includes(newSerialNum))
+                    ? existingHw.find(item =>
+                        item.hw_id !== editHardware.hw_id &&
+                        item.hw_serial_num?.trim() === newSerialNum &&
+                        activeStatuses.includes(item.hw_status?.trim())
+                    )
+                    : null;
 
                 if (duplicateAsset || duplicateSerial) {
                     hasDuplicate = true;
