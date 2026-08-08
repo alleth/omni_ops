@@ -1,5 +1,5 @@
 // src/pages/masterfile/MasterfileInventory.js
-import React, { useEffect, useState, useMemo, useRef } from 'react';
+import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import {
     XMarkIcon, ChevronRightIcon, ArrowDownTrayIcon,
@@ -1110,33 +1110,58 @@ function MasterfileInventory() {
 
     // Fetch the full hardware list once — the On Site / Pull Out toggle
     // filters in memory (see `hardware` memo) instead of re-downloading
-    // the entire table on every switch.
-    useEffect(() => {
-        const loadHardware = async () => {
-            setHardwareLoading(true);
-            try {
-                const [hwResult, reqResult] = await Promise.all([
-                    stableFetchData.current('/api/hw-tbl.json'),
-                    stableFetchData.current('/api/request-tbl.json'),
-                ]);
+    // the entire table on every switch. Exposed as a stable callback (not
+    // just an effect body) so BulkRequestModal's onSuccess can re-run it
+    // after submitting a new request -- otherwise the just-requested
+    // hardware would keep showing in the On Site list until the next full
+    // page load, since pendingRequestHwIds below is only as fresh as
+    // pulloutRequests.
+    const loadHardware = useCallback(async () => {
+        setHardwareLoading(true);
+        try {
+            const [hwResult, reqResult] = await Promise.all([
+                stableFetchData.current('/api/hw-tbl.json'),
+                stableFetchData.current('/api/request-tbl.json'),
+            ]);
 
-                setAllHardware(hwResult?.hwTbl || []);
-                setPulloutRequests(reqResult?.requests || []);
-            } catch (err) {
-                console.error('Failed to load hardware:', err);
-                setAllHardware([]);
-            } finally {
-                setHardwareLoading(false);
-            }
-        };
-
-        loadHardware();
+            setAllHardware(hwResult?.hwTbl || []);
+            setPulloutRequests(reqResult?.requests || []);
+        } catch (err) {
+            console.error('Failed to load hardware:', err);
+            setAllHardware([]);
+        } finally {
+            setHardwareLoading(false);
+        }
     }, []);
+
+    useEffect(() => {
+        loadHardware();
+    }, [loadHardware]);
+
+    // Hardware with an active PENDING pull-out or relocation request is
+    // temporarily hidden from the On Site list -- hw_status itself doesn't
+    // change until the request is actually APPROVED (see approveRequestCore
+    // in utils/requestActions.js), so without this, nothing stops the same
+    // unit being selected for a second bulk request while the first is still
+    // awaiting a decision. Rejecting (or canceling) the request just drops
+    // its status out of PENDING, so the hardware reappears here automatically
+    // on the next fetch -- no separate "restore" step needed.
+    const pendingRequestHwIds = useMemo(() => {
+        const set = new Set();
+        pulloutRequests.forEach(r => {
+            if (!r.hw_id) return;
+            if ((r.status || 'PENDING').toUpperCase() !== 'PENDING') return;
+            const type = (r.request_type || '').toUpperCase();
+            if (type === 'PULL_OUT' || type === 'RELOCATION') set.add(String(r.hw_id));
+        });
+        return set;
+    }, [pulloutRequests]);
 
     const hardware = useMemo(() => {
         if (statusFilter === 'On Site') {
             return allHardware.filter(item =>
-                item.hw_status === 'On Site' || item.hw_status === 'Onsite'
+                (item.hw_status === 'On Site' || item.hw_status === 'Onsite') &&
+                !pendingRequestHwIds.has(String(item.hw_id))
             );
         }
         if (statusFilter === 'Pull Out') {
@@ -1145,7 +1170,7 @@ function MasterfileInventory() {
             );
         }
         return allHardware;
-    }, [allHardware, statusFilter]);
+    }, [allHardware, statusFilter, pendingRequestHwIds]);
 
     const hwTypes = useMemo(() => {
         const typeMap = {};
@@ -2177,6 +2202,11 @@ function MasterfileInventory() {
                     setSelectedSiteCode(null);
                     setSelectedItemDesc(null);
                     showToast('Request processed successfully', 'success');
+                    // Re-fetch so the just-requested hardware drops out of the
+                    // On Site list immediately (see pendingRequestHwIds) --
+                    // without this it would still show as selectable until
+                    // the next full page load.
+                    loadHardware();
                 }}
                 postFormData={postFormData}
                 user={user}
