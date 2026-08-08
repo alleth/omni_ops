@@ -11,16 +11,25 @@ import { useApi } from '../../hooks/useApi';
 import AddHardwareModal from './components/AddHardwareModal';
 import BulkRequestModal from './components/BulkRequestModal';
 
-// ── Duplicate-check placeholder values ───────────────────────────────────────
-// Asset #/Serial # values that mean "this unit doesn't have one" rather than a
-// real identifier -- these must never trigger the duplicate-entry check (many
-// units legitimately share the same placeholder). Matched case-insensitively
-// since real data has every casing of these ("N/A", "n/a", "None", "NONE", ...).
-const DUPLICATE_CHECK_PLACEHOLDERS = new Set([
+// ── Asset #/Serial # placeholder values ──────────────────────────────────────
+// Values that mean "this unit doesn't have one" rather than a real identifier.
+// One shared list for every place that needs to tell a placeholder apart from
+// a real value: the add/edit duplicate-entry check (many units legitimately
+// share the same placeholder, so it must never block a save) AND the
+// "Duplicate Entries"/"Profile Accuracy" report further down this file (same
+// reasoning -- a pile of records all reading "N/A" isn't a duplicate group,
+// it's just unrecorded data). These two consumers used to keep separate
+// copies of this list; when "NA"/"NONE"/"NO PE"/"REMOVED" were added to fix
+// the add/edit check, the accuracy-report copy was missed, so "NONE" kept
+// showing up as a duplicate group there even after saving newly stopped
+// blocking on it. Matched case-insensitively since real data has every
+// casing of these ("N/A", "n/a", "None", "NONE", ...).
+const ASSET_SERIAL_PLACEHOLDERS = new Set([
     'N/A', 'NA', 'NONE', 'NO TAG', 'NO PE', 'REMOVED', 'UNREADABLE',
     'NOT_APPLICABLE', 'TAG_REMOVED_UNREADABLE', 'UNREADABLE_MISSING',
+    'NULL', 'NOT SET',
 ]);
-const isDuplicateCheckPlaceholder = (v) => DUPLICATE_CHECK_PLACEHOLDERS.has(String(v || '').trim().toUpperCase());
+const isPlaceholderValue = (v) => ASSET_SERIAL_PLACEHOLDERS.has(String(v || '').trim().toUpperCase());
 
 // ── Searchable dropdown (region / site / type) — react-select, dark-mode aware ──
 const searchSelectClassNames = {
@@ -1282,18 +1291,14 @@ function MasterfileInventory() {
     }, [pulloutRequests]);
 
     // ── Accuracy stats (computed from full filtered+sorted set, not paginated) ──
-    // Case-insensitive on purpose: the DB has "Unreadable", "UNREADABLE", and
-    // "unreadable" all in live use (same for the other placeholders below), so
-    // matching is done against the upper-cased set rather than a handful of
-    // literal case variants — otherwise stray casings slip through as if they
-    // were real values and inflate duplicate-entry / accuracy counts.
-    const PLACEHOLDER_VALUES = new Set([
-        'NOT_APPLICABLE', 'TAG_REMOVED_UNREADABLE', 'UNREADABLE_MISSING',
-        'N/A', 'NO TAG', 'UNREADABLE', 'NULL', 'NOT SET', '',
-    ]);
+    // Shares ASSET_SERIAL_PLACEHOLDERS/isPlaceholderValue (module scope, top of
+    // file) with the add/edit duplicate-entry check -- this used to be its own
+    // separate copy of the placeholder list, which is exactly how "NONE" kept
+    // showing up in Duplicate Entries even after it was added to the add/edit
+    // check's list elsewhere: one copy got updated, the other didn't.
     const validField = (v) => {
         const s = String(v ?? '').trim();
-        return s !== '' && !PLACEHOLDER_VALUES.has(s.toUpperCase());
+        return s !== '' && !isPlaceholderValue(s);
     };
 
     const accuracyStats = useMemo(() => {
@@ -1573,8 +1578,8 @@ function MasterfileInventory() {
             let hasDuplicate = false;
 
             if (
-                (newAssetNum && !isDuplicateCheckPlaceholder(newAssetNum)) ||
-                (newSerialNum && !isDuplicateCheckPlaceholder(newSerialNum))
+                (newAssetNum && !isPlaceholderValue(newAssetNum)) ||
+                (newSerialNum && !isPlaceholderValue(newSerialNum))
             ) {
                 const currentHardware = await fetchData('/api/hw-tbl.json');
                 const existingHw = currentHardware?.hwTbl || [];
@@ -1588,7 +1593,7 @@ function MasterfileInventory() {
                 // against existing records whenever the OTHER field was real,
                 // and since many On Site units legitimately share "N/A" as
                 // their asset number, that always found a "duplicate."
-                const duplicateAsset = (newAssetNum && !isDuplicateCheckPlaceholder(newAssetNum))
+                const duplicateAsset = (newAssetNum && !isPlaceholderValue(newAssetNum))
                     ? existingHw.find(item =>
                         item.hw_id !== editHardware?.hw_id &&
                         item.hw_asset_num?.trim() === newAssetNum &&
@@ -1596,7 +1601,7 @@ function MasterfileInventory() {
                     )
                     : null;
 
-                const duplicateSerial = (newSerialNum && !isDuplicateCheckPlaceholder(newSerialNum))
+                const duplicateSerial = (newSerialNum && !isPlaceholderValue(newSerialNum))
                     ? existingHw.find(item =>
                         item.hw_id !== editHardware?.hw_id &&
                         item.hw_serial_num?.trim() === newSerialNum &&
@@ -1693,8 +1698,8 @@ function MasterfileInventory() {
             let hasDuplicate = false;
 
             if (
-                (newAssetNum && !isDuplicateCheckPlaceholder(newAssetNum)) ||
-                (newSerialNum && !isDuplicateCheckPlaceholder(newSerialNum))
+                (newAssetNum && !isPlaceholderValue(newAssetNum)) ||
+                (newSerialNum && !isPlaceholderValue(newSerialNum))
             ) {
                 const currentHardware = await fetchData('/api/hw-tbl.json');
                 const existingHw = currentHardware?.hwTbl || [];
@@ -1704,7 +1709,7 @@ function MasterfileInventory() {
                 // Each field is only checked when IT ITSELF is a real value --
                 // see the matching comment in handleAddHardwareSubmit for why
                 // this can't just gate on the outer `if` above.
-                const duplicateAsset = (newAssetNum && !isDuplicateCheckPlaceholder(newAssetNum))
+                const duplicateAsset = (newAssetNum && !isPlaceholderValue(newAssetNum))
                     ? existingHw.find(item =>
                         item.hw_id !== editHardware.hw_id &&
                         item.hw_asset_num?.trim() === newAssetNum &&
@@ -1712,7 +1717,7 @@ function MasterfileInventory() {
                     )
                     : null;
 
-                const duplicateSerial = (newSerialNum && !isDuplicateCheckPlaceholder(newSerialNum))
+                const duplicateSerial = (newSerialNum && !isPlaceholderValue(newSerialNum))
                     ? existingHw.find(item =>
                         item.hw_id !== editHardware.hw_id &&
                         item.hw_serial_num?.trim() === newSerialNum &&
