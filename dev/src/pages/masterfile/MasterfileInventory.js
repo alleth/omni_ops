@@ -11,6 +11,17 @@ import { useApi } from '../../hooks/useApi';
 import AddHardwareModal from './components/AddHardwareModal';
 import BulkRequestModal from './components/BulkRequestModal';
 
+// ── Duplicate-check placeholder values ───────────────────────────────────────
+// Asset #/Serial # values that mean "this unit doesn't have one" rather than a
+// real identifier -- these must never trigger the duplicate-entry check (many
+// units legitimately share the same placeholder). Matched case-insensitively
+// since real data has every casing of these ("N/A", "n/a", "None", "NONE", ...).
+const DUPLICATE_CHECK_PLACEHOLDERS = new Set([
+    'N/A', 'NA', 'NONE', 'NO TAG', 'NO PE', 'REMOVED', 'UNREADABLE',
+    'NOT_APPLICABLE', 'TAG_REMOVED_UNREADABLE', 'UNREADABLE_MISSING',
+]);
+const isDuplicateCheckPlaceholder = (v) => DUPLICATE_CHECK_PLACEHOLDERS.has(String(v || '').trim().toUpperCase());
+
 // ── Searchable dropdown (region / site / type) — react-select, dark-mode aware ──
 const searchSelectClassNames = {
     control: ({ isFocused, isDisabled }) =>
@@ -1556,16 +1567,14 @@ function MasterfileInventory() {
             formDataToSend.append('hw_primary_role', 'Not Set');
             formDataToSend.append('user_id', user.id || user.user_id || 1);
 
-            const placeholders = ['N/A', 'No Tag', 'Unreadable', 'NOT_APPLICABLE', 'TAG_REMOVED_UNREADABLE', 'UNREADABLE_MISSING'];
-
             const newAssetNum = assetValue.trim();
             const newSerialNum = serialValue.trim();
 
             let hasDuplicate = false;
 
             if (
-                (newAssetNum && !placeholders.includes(newAssetNum)) ||
-                (newSerialNum && !placeholders.includes(newSerialNum))
+                (newAssetNum && !isDuplicateCheckPlaceholder(newAssetNum)) ||
+                (newSerialNum && !isDuplicateCheckPlaceholder(newSerialNum))
             ) {
                 const currentHardware = await fetchData('/api/hw-tbl.json');
                 const existingHw = currentHardware?.hwTbl || [];
@@ -1579,7 +1588,7 @@ function MasterfileInventory() {
                 // against existing records whenever the OTHER field was real,
                 // and since many On Site units legitimately share "N/A" as
                 // their asset number, that always found a "duplicate."
-                const duplicateAsset = (newAssetNum && !placeholders.includes(newAssetNum))
+                const duplicateAsset = (newAssetNum && !isDuplicateCheckPlaceholder(newAssetNum))
                     ? existingHw.find(item =>
                         item.hw_id !== editHardware?.hw_id &&
                         item.hw_asset_num?.trim() === newAssetNum &&
@@ -1587,7 +1596,7 @@ function MasterfileInventory() {
                     )
                     : null;
 
-                const duplicateSerial = (newSerialNum && !placeholders.includes(newSerialNum))
+                const duplicateSerial = (newSerialNum && !isDuplicateCheckPlaceholder(newSerialNum))
                     ? existingHw.find(item =>
                         item.hw_id !== editHardware?.hw_id &&
                         item.hw_serial_num?.trim() === newSerialNum &&
@@ -1678,16 +1687,14 @@ function MasterfileInventory() {
             formDataToSend.append('hw_primary_role', editHardware.hw_primary_role || 'Not Set');
             formDataToSend.append('user_id', user.id || user.user_id || 1);
 
-            const placeholders = ['N/A', 'No Tag', 'Unreadable', 'NOT_APPLICABLE', 'TAG_REMOVED_UNREADABLE', 'UNREADABLE_MISSING'];
-
             const newAssetNum = assetValue.trim();
             const newSerialNum = serialValue.trim();
 
             let hasDuplicate = false;
 
             if (
-                (newAssetNum && !placeholders.includes(newAssetNum)) ||
-                (newSerialNum && !placeholders.includes(newSerialNum))
+                (newAssetNum && !isDuplicateCheckPlaceholder(newAssetNum)) ||
+                (newSerialNum && !isDuplicateCheckPlaceholder(newSerialNum))
             ) {
                 const currentHardware = await fetchData('/api/hw-tbl.json');
                 const existingHw = currentHardware?.hwTbl || [];
@@ -1697,7 +1704,7 @@ function MasterfileInventory() {
                 // Each field is only checked when IT ITSELF is a real value --
                 // see the matching comment in handleAddHardwareSubmit for why
                 // this can't just gate on the outer `if` above.
-                const duplicateAsset = (newAssetNum && !placeholders.includes(newAssetNum))
+                const duplicateAsset = (newAssetNum && !isDuplicateCheckPlaceholder(newAssetNum))
                     ? existingHw.find(item =>
                         item.hw_id !== editHardware.hw_id &&
                         item.hw_asset_num?.trim() === newAssetNum &&
@@ -1705,7 +1712,7 @@ function MasterfileInventory() {
                     )
                     : null;
 
-                const duplicateSerial = (newSerialNum && !placeholders.includes(newSerialNum))
+                const duplicateSerial = (newSerialNum && !isDuplicateCheckPlaceholder(newSerialNum))
                     ? existingHw.find(item =>
                         item.hw_id !== editHardware.hw_id &&
                         item.hw_serial_num?.trim() === newSerialNum &&
