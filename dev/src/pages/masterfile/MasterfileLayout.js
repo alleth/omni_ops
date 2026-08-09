@@ -23,16 +23,19 @@ const HEARTBEAT_INTERVAL_MS = 60 * 1000; // keep in sync with the "online" windo
 function MasterfileLayout() {
     const navigate = useNavigate();
     const location = useLocation();
-    const { postData } = useApi();
-    // Stable ref — useApi() recreates postData every render, and depending on
-    // it directly would re-fire the heartbeat effect on every render too.
+    const { postData, fetchData } = useApi();
+    // Stable refs — useApi() recreates these every render, and depending on
+    // them directly would re-fire the effects below on every render too.
     const postDataRef = useRef(postData);
     useEffect(() => { postDataRef.current = postData; }, [postData]);
+    const fetchDataRef = useRef(fetchData);
+    useEffect(() => { fetchDataRef.current = fetchData; }, [fetchData]);
 
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
     const [dropdownOpen, setDropdownOpen] = useState(false);
     const [darkMode, setDarkMode] = useState(false);
+    const [actionableRequestCount, setActionableRequestCount] = useState(0);
     const dropdownRef = useRef(null);
 
     // Stable user object — prevents infinite re-renders
@@ -107,6 +110,46 @@ function MasterfileLayout() {
         };
     }, [user?.id]);
 
+    // Request Monitoring sidebar badge — a live count of requests that need
+    // *this* viewer's action, not a generic "there was activity" counter:
+    // FSE gets their own requests that came back REJECTED (something to
+    // edit/resubmit/delete), SPV/ADM get PENDING requests awaiting their
+    // decision (their approval queue). No "seen/dismissed" state — the count
+    // just tracks live and naturally drops as requests get handled, same as
+    // the presence heartbeat's polling cadence. ROO has no Request
+    // Monitoring nav item at all, so nothing to fetch for that role.
+    useEffect(() => {
+        const roleForBadge = (user?.user_type || 'FSE').toString().trim().toUpperCase();
+        const isFSEBadge = roleForBadge === 'FSE';
+        const isSPVBadge = ['SPV', 'SUPERVISOR'].includes(roleForBadge);
+        const isADMBadge = ['ADM', 'ADMIN', 'ADMINISTRATOR'].includes(roleForBadge);
+        if (!user?.id || (!isFSEBadge && !isSPVBadge && !isADMBadge)) {
+            setActionableRequestCount(0);
+            return undefined;
+        }
+        let query;
+        if (isFSEBadge) query = `?requested_by=${user.id}&status=REJECTED`;
+        else if (isSPVBadge) query = `?cluster_name=${encodeURIComponent(user.cluster_name || '')}&status=PENDING`;
+        else query = `?status=PENDING`;
+
+        const fetchCount = () => {
+            if (document.visibilityState !== 'visible') return;
+            fetchDataRef.current(`/api/request-tbl.json${query}`).then(res => {
+                setActionableRequestCount((res?.requests || []).length);
+            });
+        };
+        fetchCount();
+        const interval = setInterval(fetchCount, HEARTBEAT_INTERVAL_MS);
+        document.addEventListener('visibilitychange', fetchCount);
+        return () => {
+            clearInterval(interval);
+            document.removeEventListener('visibilitychange', fetchCount);
+        };
+        // Re-fires on route change too, so the count refreshes right after
+        // approving/rejecting/deleting a request on the monitoring page
+        // itself, instead of waiting up to a minute for the next poll.
+    }, [user?.id, user?.user_type, user?.cluster_name, location.pathname]);
+
     // Route guard for ROO (read-only viewer): block Dashboard & Users by direct URL.
     // /masterfile/request-monitoring is open to everyone except ROO (FSE gets
     // it scoped to just their own requests -- see MasterfileRequestMonitoring).
@@ -130,7 +173,7 @@ function MasterfileLayout() {
     const menuItems = ['ADM', 'ADMIN', 'ADMINISTRATOR'].includes(role)
         ? [
             { icon: HiHome, label: "Dashboard", path: "/masterfile/home" },
-            { icon: HiClipboardCheck, label: "Request Monitoring", path: "/masterfile/request-monitoring" },
+            { icon: HiClipboardCheck, label: "Request Monitoring", path: "/masterfile/request-monitoring", badge: actionableRequestCount },
             { icon: HiDeviceMobile, label: "Hardware Inventory", path: "/masterfile/inventory" },
             { icon: HiClipboardList, label: "Hardware Management", path: "/masterfile/management" },
             { icon: HiBookOpen, label: "Directory", path: "/masterfile/directory" },
@@ -139,7 +182,7 @@ function MasterfileLayout() {
         : ['SPV', 'SUPERVISOR'].includes(role)
             ? [
                 { icon: HiHome, label: "Dashboard", path: "/masterfile/home" },
-                { icon: HiClipboardCheck, label: "Request Monitoring", path: "/masterfile/request-monitoring" },
+                { icon: HiClipboardCheck, label: "Request Monitoring", path: "/masterfile/request-monitoring", badge: actionableRequestCount },
                 { icon: HiDeviceMobile, label: "Hardware Inventory", path: "/masterfile/inventory" },
                 { icon: HiClipboardList, label: "Hardware Management", path: "/masterfile/management" },
                 { icon: HiBookOpen, label: "Directory", path: "/masterfile/directory" },
@@ -155,7 +198,7 @@ function MasterfileLayout() {
                 ]
                 : [
                     { icon: HiHome, label: "Dashboard", path: "/masterfile/home" },
-                    { icon: HiClipboardCheck, label: "My Requests", path: "/masterfile/request-monitoring" },
+                    { icon: HiClipboardCheck, label: "My Requests", path: "/masterfile/request-monitoring", badge: actionableRequestCount },
                     { icon: HiDeviceMobile, label: "Hardware Inventory", path: "/masterfile/inventory" },
                     { icon: HiClipboardList, label: "Hardware Management", path: "/masterfile/management" },
                     { icon: HiBookOpen, label: "Directory", path: "/masterfile/directory" },
@@ -258,7 +301,12 @@ function MasterfileLayout() {
                                 onClick={() => isMobile && setSidebarOpen(false)}
                             >
                                 <item.icon className="w-5 h-5" />
-                                {item.label}
+                                <span className="flex-1">{item.label}</span>
+                                {item.badge > 0 && (
+                                    <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold leading-none">
+                                        {item.badge > 99 ? '99+' : item.badge}
+                                    </span>
+                                )}
                             </Link>
                         ))}
                     </div>
