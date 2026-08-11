@@ -5,6 +5,10 @@ import { useApi } from '../../hooks/useApi';
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
+// The full set of real clusters (org-wide roles use "All Cluster", set
+// automatically elsewhere and never offered as a manual choice here).
+const CLUSTER_OPTIONS = ['NCR', 'Luzon', 'VisMin'];
+
 function getModalRoot() {
     let el = document.getElementById('modal-root');
     if (!el) {
@@ -201,9 +205,11 @@ function AddUserModal({ onClose, onSave, spvCluster, regionOptions, isADM }) {
                     <div>
                         <label className={labelCls}>Cluster</label>
                         {isADM && form.user_type === 'FSE' ? (
-                            <input type="text" className={inputCls} value={form.cluster_name}
-                                onChange={e => set('cluster_name', e.target.value)}
-                                placeholder="e.g. NCR Cluster" />
+                            <select className={inputCls} value={form.cluster_name}
+                                onChange={e => set('cluster_name', e.target.value)}>
+                                <option value="" disabled>Select a cluster...</option>
+                                {CLUSTER_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}
+                            </select>
                         ) : (
                             <input type="text"
                                 value={isADM ? 'All Cluster' : (spvCluster || '')}
@@ -467,9 +473,11 @@ function EditRoleModal({ user, regionOptions, onClose, onSave }) {
                     {!isOrgWide && (
                         <div>
                             <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Cluster</label>
-                            <input type="text" className={inputCls} value={clusterName}
-                                onChange={e => setClusterName(e.target.value)}
-                                placeholder="e.g. NCR Cluster" />
+                            <select className={inputCls} value={clusterName}
+                                onChange={e => setClusterName(e.target.value)}>
+                                <option value="" disabled>Select a cluster...</option>
+                                {CLUSTER_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}
+                            </select>
                         </div>
                     )}
 
