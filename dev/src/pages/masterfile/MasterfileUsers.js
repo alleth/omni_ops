@@ -193,6 +193,7 @@ function AddUserModal({ onClose, onSave, spvCluster, regionOptions, isADM }) {
                                 }}
                             >
                                 <option value="ADM">ADM (Administrator)</option>
+                                <option value="SPV">SPV (Supervisor)</option>
                                 <option value="FSE">FSE (Field Service Engineer)</option>
                                 <option value="ROO">ROO (Read-Only Viewer)</option>
                             </select>
@@ -204,7 +205,7 @@ function AddUserModal({ onClose, onSave, spvCluster, regionOptions, isADM }) {
 
                     <div>
                         <label className={labelCls}>Cluster</label>
-                        {isADM && form.user_type === 'FSE' ? (
+                        {isADM && ['FSE', 'SPV'].includes(form.user_type) ? (
                             <select className={inputCls} value={form.cluster_name}
                                 onChange={e => set('cluster_name', e.target.value)}>
                                 <option value="" disabled>Select a cluster...</option>
