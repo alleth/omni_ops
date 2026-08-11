@@ -16,6 +16,18 @@
     -->
     <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
     <!--
+      Explicit link-preview image: without an og:image tag, link-unfurling
+      crawlers (Messenger, Slack, Discord, etc.) guess an image on their own --
+      typically apple-touch-icon or the largest manifest icon -- which is why
+      shared links were showing the leftover default Create React App logo
+      even after the actual browser-tab favicon.ico had been replaced.
+    -->
+    <meta property="og:title" content="CSG App" />
+    <meta property="og:image" content="%PUBLIC_URL%/logo512.png" />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:image" content="%PUBLIC_URL%/logo512.png" />
+    <!--
       Notice the use of %PUBLIC_URL% in the tags above.
       It will be replaced with the URL of the `public` folder during the build.
       Only files inside the `public` folder can be referenced from the HTML.
