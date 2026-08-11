@@ -43,7 +43,9 @@ const SearchableSelect = ({ value, onChange, options, placeholder, isDisabled = 
     />
 );
 
-const isOnSite = (item) => item.hw_status === 'On Site' || item.hw_status === 'Onsite';
+// Case/whitespace-insensitive, same as the equivalent check in MasterfileInventory.js --
+// hw_status isn't a DB enum, so real data carries spelling variants of the same state.
+const isOnSite = (item) => ['on site', 'onsite'].includes(String(item.hw_status || '').trim().toLowerCase());
 
 function MasterfileReports() {
     const { fetchData } = useApi();

@@ -31,6 +31,23 @@ const ASSET_SERIAL_PLACEHOLDERS = new Set([
 ]);
 const isPlaceholderValue = (v) => ASSET_SERIAL_PLACEHOLDERS.has(String(v || '').trim().toUpperCase());
 
+// ── hw_status normalization ──────────────────────────────────────────────────
+// hw_status has never been an enum at the DB level, so real data carries case
+// and spacing variants of the same two states ("On Site"/"Onsite", "Pull
+// Out"/"Pullout"). Comparing with strict `===` against only those two exact
+// spellings silently drops any row spelled another way (e.g. "PULLOUT",
+// "pull out", a trailing space) out of BOTH the On Site and Pull Out tabs --
+// it just vanishes from the table instead of erroring. Normalize first so the
+// On Site / Pull Out toggle is genuinely case/whitespace-insensitive.
+const normalizeHwStatus = (v) => String(v || '').trim().toLowerCase();
+const isOnSiteStatus = (v) => ['on site', 'onsite'].includes(normalizeHwStatus(v));
+const isPullOutStatus = (v) => ['pull out', 'pullout'].includes(normalizeHwStatus(v));
+// Active-status set used by the add/edit duplicate-entry check below --
+// same normalization, plus 'active'/'installed' which aren't On Site
+// variants but still count as "in use" for duplicate-blocking purposes.
+const ACTIVE_HW_STATUSES = new Set(['on site', 'onsite', 'active', 'installed']);
+const isActiveHwStatus = (v) => ACTIVE_HW_STATUSES.has(normalizeHwStatus(v));
+
 // ── Searchable dropdown (region / site / type) — react-select, dark-mode aware ──
 const searchSelectClassNames = {
     control: ({ isFocused, isDisabled }) =>
@@ -1180,14 +1197,12 @@ function MasterfileInventory() {
     const hardware = useMemo(() => {
         if (statusFilter === 'On Site') {
             return allHardware.filter(item =>
-                (item.hw_status === 'On Site' || item.hw_status === 'Onsite') &&
+                isOnSiteStatus(item.hw_status) &&
                 !pendingRequestHwIds.has(String(item.hw_id))
             );
         }
         if (statusFilter === 'Pull Out') {
-            return allHardware.filter(item =>
-                item.hw_status === 'Pull Out' || item.hw_status === 'Pullout'
-            );
+            return allHardware.filter(item => isPullOutStatus(item.hw_status));
         }
         return allHardware;
     }, [allHardware, statusFilter, pendingRequestHwIds]);
@@ -1584,8 +1599,6 @@ function MasterfileInventory() {
                 const currentHardware = await fetchData('/api/hw-tbl.json');
                 const existingHw = currentHardware?.hwTbl || [];
 
-                const activeStatuses = ['On Site', 'Active', 'Installed'];
-
                 // Each field is only checked when IT ITSELF is a real value --
                 // the outer `if` above only gates whether to bother running a
                 // check at all (true if EITHER field is real), so without this,
@@ -1597,7 +1610,7 @@ function MasterfileInventory() {
                     ? existingHw.find(item =>
                         item.hw_id !== editHardware?.hw_id &&
                         item.hw_asset_num?.trim() === newAssetNum &&
-                        activeStatuses.includes(item.hw_status?.trim())
+                        isActiveHwStatus(item.hw_status)
                     )
                     : null;
 
@@ -1605,7 +1618,7 @@ function MasterfileInventory() {
                     ? existingHw.find(item =>
                         item.hw_id !== editHardware?.hw_id &&
                         item.hw_serial_num?.trim() === newSerialNum &&
-                        activeStatuses.includes(item.hw_status?.trim())
+                        isActiveHwStatus(item.hw_status)
                     )
                     : null;
 
@@ -1704,8 +1717,6 @@ function MasterfileInventory() {
                 const currentHardware = await fetchData('/api/hw-tbl.json');
                 const existingHw = currentHardware?.hwTbl || [];
 
-                const activeStatuses = ['On Site', 'Active', 'Installed'];
-
                 // Each field is only checked when IT ITSELF is a real value --
                 // see the matching comment in handleAddHardwareSubmit for why
                 // this can't just gate on the outer `if` above.
@@ -1713,7 +1724,7 @@ function MasterfileInventory() {
                     ? existingHw.find(item =>
                         item.hw_id !== editHardware.hw_id &&
                         item.hw_asset_num?.trim() === newAssetNum &&
-                        activeStatuses.includes(item.hw_status?.trim())
+                        isActiveHwStatus(item.hw_status)
                     )
                     : null;
 
@@ -1721,7 +1732,7 @@ function MasterfileInventory() {
                     ? existingHw.find(item =>
                         item.hw_id !== editHardware.hw_id &&
                         item.hw_serial_num?.trim() === newSerialNum &&
-                        activeStatuses.includes(item.hw_status?.trim())
+                        isActiveHwStatus(item.hw_status)
                     )
                     : null;
 
