@@ -1176,13 +1176,17 @@ function MasterfileInventory() {
     }, [loadHardware]);
 
     // Hardware with an active PENDING pull-out or relocation request is
-    // temporarily hidden from the On Site list -- hw_status itself doesn't
-    // change until the request is actually APPROVED (see approveRequestCore
-    // in utils/requestActions.js), so without this, nothing stops the same
-    // unit being selected for a second bulk request while the first is still
-    // awaiting a decision. Rejecting (or canceling) the request just drops
-    // its status out of PENDING, so the hardware reappears here automatically
-    // on the next fetch -- no separate "restore" step needed.
+    // temporarily hidden from the On Site list. Source of truth is now
+    // hw_status itself: RequestTblController::add() flips it to 'Pending'
+    // the moment the request is created (so isOnSiteStatus() below already
+    // excludes it, and every other view that filters by hw_status directly --
+    // Hardware Management, Reports, the public Landing page -- stays in sync
+    // too), reverted to 'On Site' on reject/cancel and to 'Pullout' on
+    // approve (see requestActions.js). This set is kept as a belt-and-suspenders
+    // fallback for any request row whose hw_status update didn't land (or that
+    // predates this change) -- without it, nothing would stop the same unit
+    // being selected for a second bulk request while the first is still
+    // awaiting a decision.
     const pendingRequestHwIds = useMemo(() => {
         const set = new Set();
         pulloutRequests.forEach(r => {
@@ -1251,7 +1255,7 @@ function MasterfileInventory() {
         })
         .filter(h => !selectedRegion || filteredSites.some(s => s.site_code === h.site_code))
         .filter(h => !selectedSite || h.site_code === selectedSite)
-        .filter(h => !selectedType || h.item_desc === selectedType)
+        .filter(h => !selectedType || String(h.item_desc || '').trim() === selectedType)
         .filter(h => {
             if (!searchTerm) return true;
             const term = searchTerm.toLowerCase();
