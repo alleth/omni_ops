@@ -16,6 +16,7 @@ class RequestTblController extends AppController
         parent::initialize();
         $this->loadComponent('RequestHandler');
         $this->RequestTbl = $this->fetchTable('RequestTbl');
+        $this->HwTbl = $this->fetchTable('HwTbl');
 
         // Association for cluster filtering via user_tbl
         $this->RequestTbl->belongsTo('Users', [
@@ -210,6 +211,27 @@ class RequestTblController extends AppController
                 // ->id was always null here (harmless so far since no caller
                 // reads the response's `ids`, but worth being correct).
                 $savedIds[] = $requestTbl->request_id;
+
+                // Reflect the pending request on the hardware record itself.
+                // Without this, hw_status stays 'On Site' until the request is
+                // approved, and only MasterfileInventory's client-side
+                // pendingRequestHwIds cross-reference (built from PENDING
+                // request-tbl rows) hides it there -- every other view that
+                // filters by hw_status directly (Hardware Management, Reports,
+                // the public Landing page) kept counting/showing it as On Site.
+                // Reverted back to 'On Site' on reject/cancel, flipped to
+                // 'Pullout' on approve (see requestActions.js).
+                $requestType = strtoupper($data['request_type'] ?? '');
+                if (!empty($entityData['hw_id']) && in_array($requestType, ['PULL_OUT', 'RELOCATION'], true)) {
+                    try {
+                        $hw = $this->HwTbl->get($entityData['hw_id']);
+                        $hw->hw_status = 'Pending';
+                        $hw->updated_at = date('Y-m-d H:i:s');
+                        $this->HwTbl->save($hw);
+                    } catch (RecordNotFoundException $e) {
+                        // hw_id no longer exists; the request itself still saved fine.
+                    }
+                }
             } else {
                 $errors[] = $requestTbl->getErrors();
             }
@@ -296,9 +318,48 @@ class RequestTblController extends AppController
             return $this->responseJson(['success' => false, 'message' => 'Request not found']);
         }
 
+        // Captured before patching -- once CANCELED, the requester's uploaded
+        // attachment (pullout/relocation form) is deleted below, so this is
+        // the last point the pre-patch status/attachment are both known.
+        $wasCanceled = strtoupper($requestTbl->status ?? '') === 'CANCELED';
+        $previousAttachment = $requestTbl->attachment_path;
+
         $requestTbl = $this->RequestTbl->patchEntity($requestTbl, $data);
 
         if ($this->RequestTbl->save($requestTbl)) {
+            // A canceled request never went anywhere -- its attachment (and
+            // visibility to anyone but the requester; see MasterfileDashboard.js
+            // / MasterfileRequestMonitoring.js) shouldn't stick around either.
+            // Only fires on the PENDING/REJECTED -> CANCELED transition, not on
+            // every subsequent update to an already-canceled row (attachment_path
+            // is null by then anyway).
+            $becomingCanceled = !$wasCanceled && strtoupper($requestTbl->status ?? '') === 'CANCELED';
+            if ($becomingCanceled && $previousAttachment) {
+                $fullPath = WWW_ROOT . ltrim(str_replace('/', DS, $previousAttachment), DS);
+                // attachment_path is cleared below regardless of whether the
+                // unlink succeeds -- the "not viewable to anyone" guarantee is
+                // a database change (nothing in the app ever links/serves a
+                // null path again) and shouldn't depend on the filesystem
+                // delete landing. But a failed delete still leaves a real file
+                // orphaned on disk with no DB reference left to find it by, so
+                // it's logged loudly here rather than swallowed -- that log
+                // line is how an orphan like that gets noticed and cleaned up
+                // (see scripts/backfill_delete_canceled_attachments.php, which
+                // only finds rows where attachment_path is still set).
+                if (is_file($fullPath) && !@unlink($fullPath)) {
+                    \Cake\Log\Log::error(
+                        "Failed to delete attachment for canceled request #{$requestTbl->request_id}: {$fullPath}"
+                    );
+                }
+                $requestTbl->attachment_path = null;
+                if (!$this->RequestTbl->save($requestTbl)) {
+                    \Cake\Log\Log::error(
+                        "Failed to clear attachment_path for canceled request #{$requestTbl->request_id}: "
+                        . json_encode($requestTbl->getErrors())
+                    );
+                }
+            }
+
             return $this->responseJson([
                 'success' => true,
                 'message' => 'Request updated successfully',

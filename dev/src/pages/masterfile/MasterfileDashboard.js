@@ -169,7 +169,16 @@ function MasterfileDashboard() {
             const [hwData, sitesData, reqData] = results;
             let hw = hwData?.hwTbl || [];
             let sitesAll = sitesData?.siteListTbl || [];
-            const reqAll = reqData?.requests || [];
+            // A CANCELED request is only ever the requester's own business --
+            // SPV's cluster-wide fetch and ADM's org-wide fetch above would
+            // otherwise hand back everyone's canceled requests too (including
+            // whatever attachment they had on file), not just PENDING/APPROVED/
+            // REJECTED ones that are actually in play. Filtered out here, at
+            // the one place allRequests is populated, so it can't leak into
+            // requestMetrics or the "Recent Pull-Out Requests" card below.
+            const reqAll = (reqData?.requests || []).filter(r =>
+                (r.status || '').toUpperCase() !== 'CANCELED' || Number(r.requested_by) === Number(userId)
+            );
 
             if (isFSE && assignedRegionIds.length > 0) {
                 const regionSet = new Set(assignedRegionIds);
@@ -257,18 +266,23 @@ function MasterfileDashboard() {
 
         setBulkCanceling(true);
         const failures = [];
+        const warnings = [];
         for (const req of targets) {
             const result = await cancelRequestCore({ postData, request: req });
             if (!result.success) failures.push(`#${req.request_id}: ${result.error || 'failed'}`);
+            else if (result.warning) warnings.push(result.warning);
         }
         setBulkCanceling(false);
         setSelectedIds([]);
         await loadRequests();
 
-        if (failures.length === 0) {
+        if (failures.length === 0 && warnings.length === 0) {
             alert(`Canceled ${targets.length} request(s) successfully!`);
         } else {
-            alert([`Canceled ${targets.length - failures.length} of ${targets.length} request(s).`, 'Failed:', ...failures].join('\n'));
+            const parts = [`Canceled ${targets.length - failures.length} of ${targets.length} request(s).`];
+            if (warnings.length) parts.push(...warnings);
+            if (failures.length) parts.push('Failed:', ...failures);
+            alert(parts.join('\n'));
         }
     };
 

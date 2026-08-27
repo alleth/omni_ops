@@ -123,7 +123,16 @@ function MasterfileRequestMonitoring() {
             fetchRef.current(`/api/user-tbl.json${userQuery}`),
         ]);
 
-        const list = reqRes?.requests || [];
+        // A CANCELED request is only ever the requester's own business -- SPV's
+        // cluster-wide fetch and ADM's org-wide fetch above would otherwise hand
+        // back everyone's canceled requests too (attachment included), not just
+        // this viewer's own. Filtered out here, at the one place `requests` is
+        // populated, so it can't surface in the list, the CANCELED tab count, or
+        // be opened via `selected` below -- FSE's own canceled requests are
+        // unaffected since their fetch is already scoped to requested_by=userId.
+        const list = (reqRes?.requests || []).filter(r =>
+            (r.status || '').toUpperCase() !== 'CANCELED' || Number(r.requested_by) === Number(userId)
+        );
         setRequests(list);
 
         const sMap = {};

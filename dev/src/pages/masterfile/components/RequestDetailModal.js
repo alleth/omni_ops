@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useApi } from '../../../hooks/useApi';
 import { createPortal } from 'react-dom';
-import { approveRequestCore, cancelRequestCore, deleteRequestCore } from '../../../utils/requestActions';
+import { approveRequestCore, cancelRequestCore, deleteRequestCore, updateHardwareStatusForRequest } from '../../../utils/requestActions';
 
 export default function RequestDetailModal({
                                                request,
@@ -370,7 +370,7 @@ export default function RequestDetailModal({
                     return;
                 }
                 await refreshRequest();
-                alert('Request canceled successfully!');
+                alert(result.warning || 'Request canceled successfully!');
                 onCancel?.();
                 return;
             }
@@ -394,8 +394,19 @@ export default function RequestDetailModal({
                 return;
             }
 
+            // Undo the 'Pending' hw_status the add() endpoint set when this
+            // request was created (see RequestTblController::add()) -- a
+            // rejection, like a cancel, means the hardware never actually
+            // moved, so it belongs back in the On Site list.
+            let hwWarning = '';
+            const rejectType = (currentRequest.request_type || '').toUpperCase();
+            if (currentRequest.hw_id && (rejectType === 'PULL_OUT' || rejectType === 'RELOCATION')) {
+                const hwOk = await updateHardwareStatusForRequest(postData, currentRequest.hw_id, 'On Site');
+                if (!hwOk) hwWarning = ` Restoring its hardware status failed, though.`;
+            }
+
             await refreshRequest();
-            alert('Request rejected successfully!');
+            alert(`Request rejected successfully!${hwWarning}`);
             onReject?.();
 
         } catch (err) {

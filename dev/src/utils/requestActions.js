@@ -111,9 +111,12 @@ export async function approveRequestCore({ fetchData, postData, request, approve
 }
 
 /**
- * Cancels one (typically PENDING) request — status -> CANCELED. No hardware
- * side effects: a cancel means the request never went anywhere, unlike a
- * reject (which can follow an approval) or a delete.
+ * Cancels one (typically PENDING) request — status -> CANCELED, and reverts
+ * the underlying hardware's hw_status back to 'On Site' (the add() endpoint
+ * flips it to 'Pending' the moment a PULL_OUT/RELOCATION request is created —
+ * see RequestTblController::add() — so canceling has to undo that, or the
+ * hardware would stay stuck out of the On Site list with no request left to
+ * explain why).
  */
 export async function cancelRequestCore({ postData, request }) {
     const result = await postData('/api/request-tbl/update.json', {
@@ -123,6 +126,14 @@ export async function cancelRequestCore({ postData, request }) {
     });
     if (!result?.success) {
         return { success: false, error: result?.message || `Failed to cancel request #${request.request_id}` };
+    }
+
+    const requestType = (request.request_type || '').toUpperCase();
+    if (request.hw_id && (requestType === 'PULL_OUT' || requestType === 'RELOCATION')) {
+        const hwOk = await updateHardwareStatusForRequest(postData, request.hw_id, 'On Site');
+        if (!hwOk) {
+            return { success: true, warning: `Request #${request.request_id} canceled, but restoring its hardware status failed.` };
+        }
     }
     return { success: true };
 }
