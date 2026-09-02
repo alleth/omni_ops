@@ -1,9 +1,13 @@
 parameters:
     level: 8
-    checkMissingIterableValueType: false
     treatPhpDocTypesAsCertain: false
-    checkGenericClassInNonGenericObjectType: false
     paths:
         - src/
     excludePaths:
         - src/Console/Installer.php
+    # PHPStan 2.x dropped checkMissingIterableValueType / checkGenericClassInNonGenericObjectType
+    # (both were `false` here). These identifiers are the 2.x equivalent — they suppress the
+    # ~260 baked-in CakePHP @method / iterable-array PHPDoc complaints so real findings stay visible.
+    ignoreErrors:
+        - identifier: missingType.iterableValue
+        - identifier: missingType.generics

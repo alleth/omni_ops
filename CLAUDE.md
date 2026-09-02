@@ -37,7 +37,9 @@ composer cs-fix
 # Tests + style check together
 composer check
 
-# Static analysis (PHPStan level 8, scoped to src/; not wired into composer check)
+# Static analysis (phpstan/phpstan ^2.2, level 8, scoped to src/; not wired into composer check)
+# phpstan.neon suppresses missingType.iterableValue / missingType.generics (baked-in CakePHP
+# @method PHPDoc noise); ~260 real level-8 findings remain unaddressed as of this writing.
 vendor/bin/phpstan analyse
 
 # Generate migration
@@ -48,6 +50,8 @@ php bin/cake server -p 8765
 ```
 
 The backend is normally served via XAMPP Apache at `http://omniops.local`.
+
+> **CI note**: `.github/workflows/ci.yml` is the unmodified CakePHP skeleton workflow — it only triggers on push to `4.x`/`4.next`/`5.x` branches (this repo uses `master`/`main`) plus any PR, and runs PHPUnit + `phpcs` against a SQLite test DB. There is effectively no CI on the branches this project actually uses; `composer check` and `phpstan` are run manually or not at all.
 
 ### Frontend (React)
 
@@ -212,10 +216,14 @@ Protected routes:
 
 ## Deployment
 
+The live deployment lives at `Z:\xampp\htdocs\masterfilev2` (a mapped network drive, directly writable from the dev machine). `C:\xampp\htdocs\omni_ops` is only the local dev copy — a deploy is copying the built artifacts across to that path (or the VM at `192.168.4.95`, see below).
+
 1. `cd dev && npm run build`
 2. Copy `dev/build/*` to `webroot/public/`
 3. Set `config/app_local.php` production values (debug: false, correct DB DSN)
 4. `php bin/cake migrations migrate`
 5. Update CORS origins in `ItemBrandController`, `ItemDescriptionController`, `ItemModelsController` from `http://localhost:3000` to the production domain
+6. If the deploy touched any table's columns, clear the ORM schema cache on the target (`bin/cake cache clear_all`, or delete `tmp/cache/models/myapp_cake_model_default_<table>`) — see Key Domain Details, first bullet.
+7. Run any pending one-time backfill scripts in `scripts/` (each supports `--dry-run`; run once against the target, not on a schedule): `backfill_delete_canceled_attachments.php`, `backfill_pending_hw_status.php`, `backfill_revert_stuck_pending_hw_status.php` — see the request-lifecycle bullets in Key Domain Details for what each one repairs.
 
 Requires PHP 7.4+, MySQL 5.7+, Apache with mod_rewrite.
