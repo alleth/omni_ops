@@ -12,12 +12,28 @@ import {
 import { useApi } from '../../hooks/useApi';
 import SiteDetailsModal from './components/SiteDetailsModal';
 
+// Sentinel for the Office Type dropdown so sites with a blank office_type stay reachable
+const BLANK_OFFICE_TYPE = '__BLANK__';
+
+// A site is "dual server" when physical_site_count is 2 — the same rule SiteDetailsModal
+// uses to render its own Dual Server Yes/No field, so the filter and the modal agree.
+const isDualServer = (site) => Number(site.physical_site_count) === 2;
+
+// office_type is free-ish text; trim before comparing (trailing whitespace once broke the
+// Inventory Type filter the same way)
+const normalize = (value) => String(value ?? '').trim();
+
+const filterSelectCls =
+    'px-3 py-2 text-sm border border-gray-300 rounded-md dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500';
+
 function MasterfileDirectory() {
     const { fetchData, loading, error } = useApi();
 
     const [sites, setSites] = useState([]);
     const [regions, setRegions] = useState({});
     const [globalFilter, setGlobalFilter] = useState('');
+    const [officeTypeFilter, setOfficeTypeFilter] = useState('');
+    const [dualServerFilter, setDualServerFilter] = useState('');
     const [selectedSite, setSelectedSite] = useState(null);
     const [modalMode, setModalMode] = useState('view');
 
@@ -76,6 +92,50 @@ function MasterfileDirectory() {
         { label: 'District Office', value: siteStats.districtOffice, accent: 'text-sky-600 dark:text-sky-400' },
         { label: 'Licensing Center', value: siteStats.licensing, accent: 'text-rose-600 dark:text-rose-400' },
     ];
+
+    // ── Office Type options, derived from the data rather than a hardcoded list so
+    //    legacy values not present in SiteDetailsModal's dropdown are still filterable ──
+    const officeTypeOptions = useMemo(() => {
+        const seen = new Map();
+        let hasBlank = false;
+
+        sites.forEach(site => {
+            const label = normalize(site.office_type);
+            if (!label) {
+                hasBlank = true;
+                return;
+            }
+            const key = label.toLowerCase();
+            if (!seen.has(key)) seen.set(key, label);
+        });
+
+        const list = [...seen.values()].sort((a, b) => a.localeCompare(b));
+        return hasBlank ? [...list, BLANK_OFFICE_TYPE] : list;
+    }, [sites]);
+
+    // Pre-filter the rows handed to the table; the global search still runs on top of this.
+    // The summary cards above stay on the full site list on purpose — they're an overview.
+    const visibleSites = useMemo(() => {
+        if (!officeTypeFilter && !dualServerFilter) return sites;
+
+        return sites.filter(site => {
+            if (officeTypeFilter) {
+                const value = normalize(site.office_type);
+                if (officeTypeFilter === BLANK_OFFICE_TYPE) {
+                    if (value) return false;
+                } else if (value.toLowerCase() !== officeTypeFilter.toLowerCase()) {
+                    return false;
+                }
+            }
+
+            if (dualServerFilter === 'dual' && !isDualServer(site)) return false;
+            if (dualServerFilter === 'single' && isDualServer(site)) return false;
+
+            return true;
+        });
+    }, [sites, officeTypeFilter, dualServerFilter]);
+
+    const hasActiveFilters = Boolean(globalFilter || officeTypeFilter || dualServerFilter);
 
     const columnHelper = createColumnHelper();
 
@@ -150,7 +210,7 @@ function MasterfileDirectory() {
     };
 
     const table = useReactTable({
-        data: sites,
+        data: visibleSites,
         columns,
         state: { globalFilter },
         onGlobalFilterChange: setGlobalFilter,
@@ -236,13 +296,57 @@ function MasterfileDirectory() {
 
             {/* Filters */}
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <div className="w-full sm:w-80">
+                <div className="flex flex-col sm:flex-row sm:items-center gap-3 w-full sm:w-auto">
                     <input
                         value={globalFilter ?? ''}
                         onChange={(e) => setGlobalFilter(e.target.value)}
                         placeholder="Search site code, name, address..."
-                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                        className="w-full sm:w-72 px-3 py-2 text-sm border border-gray-300 rounded-md dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
                     />
+
+                    <select
+                        value={officeTypeFilter}
+                        onChange={(e) => {
+                            setOfficeTypeFilter(e.target.value);
+                            table.setPageIndex(0);
+                        }}
+                        title={officeTypeFilter && officeTypeFilter !== BLANK_OFFICE_TYPE ? officeTypeFilter : 'All Office Types'}
+                        className={`${filterSelectCls} w-full sm:w-56`}
+                    >
+                        <option value="">All Office Types</option>
+                        {officeTypeOptions.map(option => (
+                            <option key={option} value={option}>
+                                {option === BLANK_OFFICE_TYPE ? '— Not set —' : option}
+                            </option>
+                        ))}
+                    </select>
+
+                    <select
+                        value={dualServerFilter}
+                        onChange={(e) => {
+                            setDualServerFilter(e.target.value);
+                            table.setPageIndex(0);
+                        }}
+                        className={`${filterSelectCls} w-full sm:w-44`}
+                    >
+                        <option value="">All Server Setups</option>
+                        <option value="dual">Dual Server</option>
+                        <option value="single">Single Server</option>
+                    </select>
+
+                    {hasActiveFilters && (
+                        <button
+                            onClick={() => {
+                                setGlobalFilter('');
+                                setOfficeTypeFilter('');
+                                setDualServerFilter('');
+                                table.setPageIndex(0);
+                            }}
+                            className="px-3 py-2 text-sm text-gray-600 dark:text-gray-400 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700/50 whitespace-nowrap"
+                        >
+                            Clear filters
+                        </button>
+                    )}
                 </div>
 
                 <div className="flex items-center gap-3 text-sm text-gray-600 dark:text-gray-400">
@@ -302,7 +406,7 @@ function MasterfileDirectory() {
                     ) : table.getRowModel().rows.length === 0 ? (
                         <tr>
                             <td colSpan={columns.length} className="px-5 py-10 text-center text-sm text-gray-500 dark:text-gray-400">
-                                No sites found
+                                {hasActiveFilters ? 'No sites match the current filters' : 'No sites found'}
                             </td>
                         </tr>
                     ) : (
