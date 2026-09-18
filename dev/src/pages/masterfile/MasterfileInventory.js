@@ -139,13 +139,30 @@ const SkeletonTableCard = () => (
 // Note `hw.region_name` is used as a region *id* deliberately — despite the name,
 // that column stores region IDs (verified: all 18,249 rows match a region_id and
 // none match a region_name), so it is only useful once resolved through the map.
-const describeHardwareLocation = (hw, siteMap, regionMap) => {
-    const site = siteMap[hw?.site_code];
+// Resolves a hardware row's region to a display NAME. Single definition so the
+// tables, the detail modal and the duplicate warnings can't drift.
+//
+// Two lookups, in order:
+//   1. via the row's site -> site.region_id -> regionMap
+//   2. via hw.region_name, which — despite the column name — stores a region ID,
+//      not a name (verified: all 18,249 hw_tbl rows match a region_id and none
+//      match a region_name). So it is resolved THROUGH the map too. Rendering it
+//      raw, as this used to, printed a bare number like "16" instead of "CAR".
+//
+// `regionMap` must cover every region, not just the viewer's own — several
+// callers display records from outside the user's scope.
+const resolveRegionName = (hw, siteMap, regionMap, fallback = '—') => {
+    const site = siteMap?.[hw?.site_code];
 
-    const regionName =
-        (site && regionMap[String(site.region_id)]) ||
-        regionMap[String(hw?.region_name ?? '')] ||
-        'Unknown Region';
+    return (site && regionMap?.[String(site.region_id)]) ||
+        regionMap?.[String(hw?.region_name ?? '')] ||
+        fallback;
+};
+
+const describeHardwareLocation = (hw, siteMap, regionMap) => {
+    const site = siteMap?.[hw?.site_code];
+
+    const regionName = resolveRegionName(hw, siteMap, regionMap, 'Unknown Region');
 
     const siteInfo = site
         ? `${site.site_code} – ${site.site_name || 'Unnamed'}`
@@ -290,8 +307,7 @@ const DuplicateGroupTable = ({ groups, accentClass, headerBgClass, valueTextClas
                     </thead>
                     <tbody>
                         {items.map(h => {
-                            const site = siteMap?.[h.site_code];
-                            const regionName = site ? (regionMap?.[String(site.region_id)] || h.region_name) : h.region_name;
+                            const regionName = resolveRegionName(h, siteMap, regionMap);
                             return (
                                 <tr key={h.hw_id} className="border-b border-gray-50 dark:border-gray-800/50 last:border-0">
                                     <td className="px-3 py-1.5 text-gray-700 dark:text-gray-300">{h.item_desc || '—'}</td>
@@ -366,8 +382,7 @@ const AttachmentCoverageContent = ({ stats, siteMap, regionMap }) => (
                 </thead>
                 <tbody>
                     {stats.noAttachmentItems.map(h => {
-                        const site = siteMap?.[h.site_code];
-                        const regionName = site ? (regionMap?.[String(site.region_id)] || h.region_name) : h.region_name;
+                        const regionName = resolveRegionName(h, siteMap, regionMap);
                         return (
                             <tr key={h.hw_id} className="border-b border-gray-50 dark:border-gray-800/50 last:border-0 hover:bg-gray-50 dark:hover:bg-gray-800/30">
                                 <td className="px-3 py-2 font-mono text-gray-700 dark:text-gray-300">{h.hw_asset_num || '—'}</td>
@@ -779,7 +794,9 @@ const HardwareDetailModal = ({ item, request, siteMap, regionMap, onClose, onAtt
     })();
 
     const site = siteMap?.[item.site_code];
-    const regionName = site ? (regionMap?.[String(site.region_id)] || '—') : '—';
+    // Shared resolver, so this also falls back to the row's own region id when
+    // the site is missing from siteMap — it previously showed '—' in that case.
+    const regionName = resolveRegionName(item, siteMap, regionMap);
     const siteDisplay = site ? `${site.site_code} – ${site.site_name || ''}`.trim() : (item.site_code || '—');
 
     return createPortal(
@@ -1369,7 +1386,7 @@ function MasterfileInventory() {
             if (!searchTerm) return true;
             const term = searchTerm.toLowerCase();
             const site = siteMap[h.site_code];
-            const regionName = site ? (regionMap[String(site.region_id)] || '') : '';
+            const regionName = resolveRegionName(h, siteMap, regionMap, '');
             return (
                 (h.hw_asset_num || '').toLowerCase().includes(term) ||
                 (h.hw_serial_num || '').toLowerCase().includes(term) ||
@@ -1898,7 +1915,7 @@ function MasterfileInventory() {
 
     const extractReportRow = (item) => {
         const site = siteMap[item.site_code];
-        const regionName = site ? (regionMap[String(site.region_id)] || '') : '';
+        const regionName = resolveRegionName(item, siteMap, regionMap, '');
         const row = [
             regionName,
             item.site_code || '',
@@ -2224,7 +2241,7 @@ function MasterfileInventory() {
                             ) : (
                                 paginatedHardware.map((item, idx) => {
                                     const site = siteMap[item.site_code];
-                                    const regionName = site ? regionMap[String(site.region_id)] : null;
+                                    const regionName = resolveRegionName(item, siteMap, regionMap, null);
                                     const isPullOut = statusFilter === 'Pull Out';
                                     const rowTextClass = isPullOut
                                         ? 'text-gray-400 dark:text-gray-500'
