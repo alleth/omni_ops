@@ -122,7 +122,22 @@ omni_ops/
 
 ### Backend API
 
-> **No `/api/` endpoint is authenticated or authorized.** CSRF is skipped for any path starting with `/api` (`Application.php`), no controller reads the `Auth.User` session that `login()` writes (`grep -rn "read('Auth" src/` returns nothing), no controller checks `user_type`, and `src/Controller/Component/` is empty. Every role rule in **Role-Based Access** below is client-side UI gating only — including `reset-password`, `update-role` and `delete`. Treat any "only role X can do Y" statement in this file as describing which buttons render, never what the server enforces. Adding a real authorization layer is an open design decision, not a patch.
+> **API authorization is phased, and currently only Phase 1 is enforced.** `src/Controller/Api/ApiController.php` is the base that checks the session identity `login()` writes, against a per-action role map each controller declares in `protectedActions()`. It is **allow-by-default**: an action is only checked if it is named in that map, so anything not listed behaves exactly as it did when nothing was enforced at all.
+>
+> **Phase 1 (enforced, live since 2026-09-18)** — the account-takeover and destructive endpoints:
+>
+> | Action | Allowed |
+> |---|---|
+> | `user-tbl/add`, `user-tbl/reset-password`, `user-tbl/update-region` | ADM, SPV |
+> | `user-tbl/update-role`, `user-tbl/delete` | ADM |
+> | `hw-tbl/delete` | any signed-in user |
+> | `site-list-tbl/delete` | ADM, SPV, FSE (ROO excluded, mirroring the UI) |
+>
+> **Everything else is still unauthenticated**, including every read and most writes (`hw-tbl/update`, `request-tbl/*`, `site-list-tbl/add|edit`, `user-tbl/login` by design). CSRF also remains skipped for `/api` in `Application.php`. So for any action not in the table above, the **Role-Based Access** rules below still describe only which buttons render. Phase 2 inverts the default to deny-by-default once every caller is confirmed — until then, don't assume an endpoint is protected because a role "shouldn't" reach it.
+>
+> **When adding a controller or action here**: extend `ApiController`, set CORS headers *before* delegating up, and **`return parent::beforeFilter($event)`** — discarding that return (which the controllers originally did) lets a rejected request run the action anyway. OPTIONS is exempt from the check because preflight carries no cookies. Role matching accepts the same aliases the frontend uses (`ADMIN`/`ADMINISTRATOR`, `SUPERVISOR`) so the server can never be stricter than the UI.
+>
+> Identity rides the ordinary `PHPSESSID` cookie — no token, no client change. The SPA is same-origin with the API in production (`MasterfileLogin`'s `getApiBase()` returns `''`) and goes through the CRA proxy in dev, and `fetch` defaults to `credentials: 'same-origin'`, so the cookie is already sent on every `useApi` call. Only the absolute-URL components (`MasterfileLogin`, `MasterfileProfile`) are cross-origin in dev, and both hit `UserTblController`, whose CORS allowlist already sets `credentials: true`.
 
 All endpoints are under `/api/` prefix, return JSON, and have CSRF disabled (handled by CORS preflight). Responses over 1 KB are gzip-compressed by `App\Middleware\GzipMiddleware` (registered in `Application.php`) — this is done in PHP because Apache `mod_deflate` is disabled in the XAMPP setups this app runs on; the full `hw-tbl` payload is ~12 MB raw / ~0.5 MB gzipped. CORS is configured per-controller in `beforeFilter()`. Configuration varies:
 - `HwTblController`, `RegionTblController`, `RequestTblController`, `SiteListTblController` — allow `*` origin (mirrors the request's `Origin` header)
@@ -205,7 +220,7 @@ Protected routes:
 
 `user_type` controls both data scope and UI capabilities. The roles are **not a hierarchy** — FSE is the editing role, while ADM/SPV/ROO have broader data scope but are read-only for hardware records.
 
-**All of it is client-side only.** Nothing below is enforced by the server (see the warning at the top of **Backend API**), so every rule here describes which controls render, not who can perform the action. A "read-only" role is one whose buttons are hidden. Implementing a new restriction means adding a UI gate; there is currently no server-side layer to add one to.
+**Almost all of it is client-side only.** Apart from the Phase 1 actions listed at the top of **Backend API**, nothing below is enforced by the server — every rule here describes which controls render, not who can perform the action. A "read-only" role is one whose buttons are hidden. A new restriction needs *both* a UI gate and, if it matters, an entry in the relevant controller's `protectedActions()`.
 
 - `FSE` (default) — can add hardware, edit hardware, create bulk pull-out/relocation requests; scoped to their `region_assigned` IDs. No Users management tab.
 - `ADM` — read-only in Hardware Management, but in Inventory **can add and edit hardware** same as FSE (the "+ Add Hardware" button and each row's "Edit" action are both gated `isFSE || isADM`, not FSE-only; there's no delete action on this page for either role) — the underlying submit handlers (`handleAddHardwareSubmit`/`handleEditHardwareSubmit`) and `AddHardwareModal` have no role checks of their own, so this is purely a UI-visibility gate; full data scope if `cluster_name === 'All Cluster'` (all regions), otherwise same region scoping as FSE. In Inventory, org-wide ADM (`cluster_name === 'All Cluster'`, same as ROO) gets the Site dropdown enabled without first picking a Region — everyone else must select a Region before Site unlocks; all four filter controls (Region/Site/Type/Search) are disabled while hardware data is still loading (`isLoading = baseLoading || hardwareLoading`). In Users tab: can reset any user's password, add new users via a role dropdown (ADM, SPV, FSE, or ROO) — for a new ADM/ROO, cluster auto-sets to `'All Cluster'` and the Region Assigned field is hidden; for a new SPV, cluster is an editable dropdown (`CLUSTER_OPTIONS`: NCR/Luzon/VisMin) with Region Assigned hidden (SPV scope is cluster-wide, not per-region); for a new FSE, both cluster (same dropdown) and region are editable — and can reassign any existing user's role/type via a "Change Role" button (`EditRoleModal` → `POST /api/user-tbl/update-role.json`, role options ADM/SPV/FSE/ROO; switching to ADM or ROO auto-sets cluster to `'All Cluster'` and clears region_assigned). In `AddHardwareModal`, matched as `['ADM', 'ADMIN', 'ADMINISTRATOR']`.
