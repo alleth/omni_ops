@@ -7,3 +7,23 @@
 <IfModule mod_mime.c>
     AddType image/jpeg .jfif
 </IfModule>
+
+# Uploads are user-supplied and served straight off disk by Apache (webroot/.htaccess
+# only rewrites to index.php when the file does NOT exist). Nothing in here should ever
+# be executed as code -- RequestTblController validates type on upload, but this is the
+# backstop if a bad file ever lands here anyway.
+<IfModule mod_php7.c>
+    php_flag engine off
+</IfModule>
+<IfModule mod_php.c>
+    php_flag engine off
+</IfModule>
+
+# Strip handlers/types so a stray .php/.phtml/.cgi is served as plain bytes, not run.
+RemoveHandler .php .phtml .php3 .php4 .php5 .php7 .phps .cgi .pl .py .jsp .asp .shtml
+RemoveType .php .phtml .php3 .php4 .php5 .php7 .phps .cgi .pl .py .jsp .asp .shtml
+AddType text/plain .php .phtml .php3 .php4 .php5 .php7 .phps .cgi .pl .py .jsp .asp .shtml
+
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+</IfModule>

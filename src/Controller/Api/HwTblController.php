@@ -93,8 +93,12 @@ class HwTblController extends AppController
                     return $this->response
                         ->withType('json')
                         ->withStringBody(json_encode([
+                            // hw_id, not id -- the primary key column is hw_id, so
+                            // ->id was always null here. Both keys are sent so any
+                            // caller still reading `id` keeps working.
                             'success' => true,
-                            'id' => $hwTbl->id,
+                            'id' => $hwTbl->hw_id,
+                            'hw_id' => $hwTbl->hw_id,
                             'message' => 'The hardware has been saved.'
                         ]));
                 }

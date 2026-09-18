@@ -11,6 +11,93 @@ use Cake\Utility\Text;
 
 class RequestTblController extends AppController
 {
+    /**
+     * Verified MIME type => the extension the file gets on disk.
+     *
+     * Both the Content-Type header and the filename on a multipart upload are
+     * supplied by the client and can say anything, so neither is used to decide
+     * what a file is or what it is named here. The type is sniffed from the
+     * file's own bytes and the extension comes from this map, which is what
+     * stops a .php from being written into WWW_ROOT/uploads (served straight
+     * off disk by Apache) just by declaring Content-Type: application/pdf.
+     */
+    private const ALLOWED_UPLOAD_TYPES = [
+        'application/pdf' => 'pdf',
+        'image/jpeg'      => 'jpg',
+        'image/png'       => 'png',
+    ];
+
+    private const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+
+    /**
+     * Returns the canonical extension for an uploaded file after confirming its
+     * real type from its contents, or null if it isn't an allowed type or is
+     * over the size limit.
+     */
+    private function verifiedUploadExtension(\Psr\Http\Message\UploadedFileInterface $file): ?string
+    {
+        $size = $file->getSize();
+        if ($size !== null && $size > self::MAX_UPLOAD_BYTES) {
+            return null;
+        }
+
+        try {
+            $stream = $file->getStream();
+            $stream->rewind();
+            // Magic bytes for PDF/JPEG/PNG all live well inside the first few KB.
+            $head = $stream->read(4096);
+            $stream->rewind();
+        } catch (\Throwable $e) {
+            return null;
+        }
+
+        if ($head === '' || $head === false) {
+            return null;
+        }
+
+        $detected = (new \finfo(FILEINFO_MIME_TYPE))->buffer($head);
+
+        return self::ALLOWED_UPLOAD_TYPES[$detected] ?? null;
+    }
+
+    /**
+     * Removes an attachment file from disk, but only once no request row still
+     * points at it.
+     *
+     * A bulk submission saves one row per hardware item and gives every one of
+     * them the SAME attachment_path (add() uploads a single form covering the
+     * whole batch). Deleting the file when one of those rows is canceled used to
+     * break the attachment link for all its siblings, which are still live
+     * requests. Checking for other referencing rows first keeps a shared form on
+     * disk until the last row referencing it is gone.
+     *
+     * @param string $path      attachment_path as stored (web path, e.g. /uploads/...)
+     * @param int    $exceptId  request_id to ignore when looking for other referents
+     */
+    private function deleteAttachmentFile(string $path, int $exceptId): void
+    {
+        if ($path === '') {
+            return;
+        }
+
+        $stillReferenced = $this->RequestTbl->find()
+            ->where(['attachment_path' => $path, 'request_id !=' => $exceptId])
+            ->count();
+
+        if ($stillReferenced > 0) {
+            return;
+        }
+
+        $fullPath = WWW_ROOT . ltrim(str_replace('/', DS, $path), DS);
+        if (is_file($fullPath) && !@unlink($fullPath)) {
+            // Logged rather than swallowed: a failed delete leaves a real file on
+            // disk that no DB row references any more, so this line is the only
+            // way it gets noticed (backfill_delete_canceled_attachments.php only
+            // finds rows where attachment_path is still set).
+            \Cake\Log\Log::error("Failed to delete attachment file: {$fullPath}");
+        }
+    }
+
     public function initialize(): void
     {
         parent::initialize();
@@ -142,31 +229,51 @@ class RequestTblController extends AppController
         $uploadedFile = $this->request->getUploadedFile('attachment');
 
         if ($uploadedFile && $uploadedFile->getError() === UPLOAD_ERR_OK) {
-            $allowedTypes = ['application/pdf', 'image/jpeg', 'image/png'];
-            $mimeType = $uploadedFile->getClientMediaType();
+            $ext = $this->verifiedUploadExtension($uploadedFile);
 
-            if (in_array($mimeType, $allowedTypes)) {
-                $requestType = $data['request_type'] ?? 'PULL_OUT';
-                $subFolderName = ($requestType === 'RELOCATION') ? 'relocation_forms' : 'pullout_forms';
-                $monthYear = date('Y-m');
-                $uploadSubDir = $subFolderName . DS . $monthYear;
+            // A rejected file used to be dropped silently here: the request saved
+            // with attachment_path = null and the response still said success, so
+            // the requester was told their form was on file when it wasn't.
+            if ($ext === null) {
+                return $this->response->withStatus(400)->withType('json')->withStringBody(json_encode([
+                    'success' => false,
+                    'message' => 'Attachment must be a PDF, JPEG or PNG of at most 5MB.',
+                ]));
+            }
 
-                $uploadDir = WWW_ROOT . 'uploads' . DS . $uploadSubDir;
-                if (!is_dir($uploadDir)) {
-                    mkdir($uploadDir, 0755, true);
-                }
+            $requestType = $data['request_type'] ?? 'PULL_OUT';
+            $subFolderName = ($requestType === 'RELOCATION') ? 'relocation_forms' : 'pullout_forms';
+            $monthYear = date('Y-m');
+            $uploadSubDir = $subFolderName . DS . $monthYear;
 
-                $timestamp = date('Ymd-His');
-                $originalExt = strtolower(pathinfo($uploadedFile->getClientFilename(), PATHINFO_EXTENSION));
-                $prefix = ($requestType === 'RELOCATION') ? 'relocation_' : 'pullout_';
-                $uniqueName = $prefix . $timestamp . '_' . uniqid() . '.' . $originalExt;
-                $targetPath = $uploadDir . DS . $uniqueName;
+            $uploadDir = WWW_ROOT . 'uploads' . DS . $uploadSubDir;
+            if (!is_dir($uploadDir) && !mkdir($uploadDir, 0755, true) && !is_dir($uploadDir)) {
+                \Cake\Log\Log::error("Could not create upload directory: {$uploadDir}");
+                return $this->response->withStatus(500)->withType('json')->withStringBody(json_encode([
+                    'success' => false,
+                    'message' => 'Could not store the attachment. Please try again.',
+                ]));
+            }
 
+            $timestamp = date('Ymd-His');
+            $prefix = ($requestType === 'RELOCATION') ? 'relocation_' : 'pullout_';
+            $uniqueName = $prefix . $timestamp . '_' . uniqid() . '.' . $ext;
+            $targetPath = $uploadDir . DS . $uniqueName;
+
+            // moveTo() throws on failure; unguarded it surfaced as a 500 with no
+            // indication the attachment was the cause.
+            try {
                 $uploadedFile->moveTo($targetPath);
+            } catch (\Throwable $e) {
+                \Cake\Log\Log::error("Attachment moveTo failed ({$targetPath}): " . $e->getMessage());
+                return $this->response->withStatus(500)->withType('json')->withStringBody(json_encode([
+                    'success' => false,
+                    'message' => 'Could not store the attachment. Please try again.',
+                ]));
+            }
 
-                if (file_exists($targetPath)) {
-                    $attachmentPath = '/uploads/' . str_replace(DS, '/', $uploadSubDir) . '/' . $uniqueName;
-                }
+            if (file_exists($targetPath)) {
+                $attachmentPath = '/uploads/' . str_replace(DS, '/', $uploadSubDir) . '/' . $uniqueName;
             }
         }
 
@@ -174,70 +281,93 @@ class RequestTblController extends AppController
         $errors = [];
         $items = isset($data['items']) && is_array($data['items']) ? $data['items'] : [$data];
 
-        foreach ($items as $itemData) {
-            $entityData = [
-                'hw_id'             => $itemData['hw_id'] ?? null,
-                'request_type'      => $data['request_type'] ?? null,
-                'requested_by'      => $data['requested_by'] ?? null,
-                'status'            => $data['status'] ?? 'PENDING',
-                'destination_site'  => $data['destination_site'] ?? null,
-                'site_code'         => $itemData['site_code'] ?? $data['site_code'] ?? null,
-                'asset_num'         => $itemData['asset_num'] ?? null,
-                'serial_num'        => $itemData['serial_num'] ?? null,
-                'item_desc'         => $itemData['item_desc'] ?? null,
-                'hw_brand_name'     => $itemData['hw_brand_name'] ?? null,
-                'hw_model'          => $itemData['hw_model'] ?? null,
-                'quantity'          => $itemData['quantity'] ?? 1,
-                'remarks'           => $itemData['remarks'] ?? $data['remarks'] ?? null,
-                'attachment_path'   => $attachmentPath,
-                // Pull-out detail fields
-                'sr_num'            => $data['sr_num'] ?? null,
-                'sr_date'           => $data['sr_date'] ?? null,
-                'return_date'       => $data['return_date'] ?? null,
-                'delivery_method'   => $data['delivery_method'] ?? null,
-                'tracking_num'      => $data['tracking_num'] ?? null,
-                'delivered_by'      => $data['delivered_by'] ?? null,
-                'pickup_date'       => $data['pickup_date'] ?? null,
-                // Relocation detail fields
-                'date_transfer'     => $data['date_transfer'] ?? null,
-                'transfer_from_name' => $data['transfer_from_name'] ?? null,
-                'transfer_to_name'  => $data['transfer_to_name'] ?? null,
-            ];
+        // A bulk submission is one user action and has to land all-or-nothing.
+        // Without this, a validation failure on item 3 of 5 still left items 1-2
+        // saved -- and their hardware already flipped to 'Pending' below -- while
+        // the client got a 400 saying nothing had been saved, so the stranded
+        // rows were invisible from the UI that created them.
+        $connection = $this->RequestTbl->getConnection();
+        $connection->begin();
 
-            $requestTbl = $this->RequestTbl->newEntity($entityData);
+        try {
+            foreach ($items as $itemData) {
+                $entityData = [
+                    'hw_id'             => $itemData['hw_id'] ?? null,
+                    'request_type'      => $data['request_type'] ?? null,
+                    'requested_by'      => $data['requested_by'] ?? null,
+                    'status'            => $data['status'] ?? 'PENDING',
+                    'destination_site'  => $data['destination_site'] ?? null,
+                    'site_code'         => $itemData['site_code'] ?? $data['site_code'] ?? null,
+                    'asset_num'         => $itemData['asset_num'] ?? null,
+                    'serial_num'        => $itemData['serial_num'] ?? null,
+                    'item_desc'         => $itemData['item_desc'] ?? null,
+                    'hw_brand_name'     => $itemData['hw_brand_name'] ?? null,
+                    'hw_model'          => $itemData['hw_model'] ?? null,
+                    'quantity'          => $itemData['quantity'] ?? 1,
+                    'remarks'           => $itemData['remarks'] ?? $data['remarks'] ?? null,
+                    'attachment_path'   => $attachmentPath,
+                    // Pull-out detail fields
+                    'sr_num'            => $data['sr_num'] ?? null,
+                    'sr_date'           => $data['sr_date'] ?? null,
+                    'return_date'       => $data['return_date'] ?? null,
+                    'delivery_method'   => $data['delivery_method'] ?? null,
+                    'tracking_num'      => $data['tracking_num'] ?? null,
+                    'delivered_by'      => $data['delivered_by'] ?? null,
+                    'pickup_date'       => $data['pickup_date'] ?? null,
+                    // Relocation detail fields
+                    'date_transfer'     => $data['date_transfer'] ?? null,
+                    'transfer_from_name' => $data['transfer_from_name'] ?? null,
+                    'transfer_to_name'  => $data['transfer_to_name'] ?? null,
+                ];
 
-            if ($this->RequestTbl->save($requestTbl)) {
-                // Not ->id -- the primary key column is request_id, not id, so
-                // ->id was always null here (harmless so far since no caller
-                // reads the response's `ids`, but worth being correct).
-                $savedIds[] = $requestTbl->request_id;
+                $requestTbl = $this->RequestTbl->newEntity($entityData);
 
-                // Reflect the pending request on the hardware record itself.
-                // Without this, hw_status stays 'On Site' until the request is
-                // approved, and only MasterfileInventory's client-side
-                // pendingRequestHwIds cross-reference (built from PENDING
-                // request-tbl rows) hides it there -- every other view that
-                // filters by hw_status directly (Hardware Management, Reports,
-                // the public Landing page) kept counting/showing it as On Site.
-                // Reverted back to 'On Site' on reject/cancel, flipped to
-                // 'Pullout' on approve (see requestActions.js).
-                $requestType = strtoupper($data['request_type'] ?? '');
-                if (!empty($entityData['hw_id']) && in_array($requestType, ['PULL_OUT', 'RELOCATION'], true)) {
-                    try {
-                        $hw = $this->HwTbl->get($entityData['hw_id']);
-                        $hw->hw_status = 'Pending';
-                        $hw->updated_at = date('Y-m-d H:i:s');
-                        $this->HwTbl->save($hw);
-                    } catch (RecordNotFoundException $e) {
-                        // hw_id no longer exists; the request itself still saved fine.
+                if ($this->RequestTbl->save($requestTbl)) {
+                    // Not ->id -- the primary key column is request_id, not id, so
+                    // ->id was always null here (harmless so far since no caller
+                    // reads the response's `ids`, but worth being correct).
+                    $savedIds[] = $requestTbl->request_id;
+
+                    // Reflect the pending request on the hardware record itself.
+                    // Without this, hw_status stays 'On Site' until the request is
+                    // approved, and only MasterfileInventory's client-side
+                    // pendingRequestHwIds cross-reference (built from PENDING
+                    // request-tbl rows) hides it there -- every other view that
+                    // filters by hw_status directly (Hardware Management, Reports,
+                    // the public Landing page) kept counting/showing it as On Site.
+                    // Reverted back to 'On Site' on reject/cancel, flipped to
+                    // 'Pullout' on approve (see requestActions.js).
+                    $requestType = strtoupper($data['request_type'] ?? '');
+                    if (!empty($entityData['hw_id']) && in_array($requestType, ['PULL_OUT', 'RELOCATION'], true)) {
+                        try {
+                            $hw = $this->HwTbl->get($entityData['hw_id']);
+                            $hw->hw_status = 'Pending';
+                            // No updated_at here: hw_tbl has no such column, so the
+                            // assignment that used to sit on this line never reached
+                            // the generated SQL.
+                            $this->HwTbl->save($hw);
+                        } catch (RecordNotFoundException $e) {
+                            // hw_id no longer exists; the request itself still saved fine.
+                        }
                     }
+                } else {
+                    $errors[] = $requestTbl->getErrors();
                 }
-            } else {
-                $errors[] = $requestTbl->getErrors();
             }
+        } catch (\Throwable $e) {
+            // Without this, a DB-level failure mid-loop would leave the
+            // transaction open on the way out instead of undoing the batch.
+            $connection->rollback();
+            \Cake\Log\Log::error('Request batch save failed, rolled back: ' . $e->getMessage());
+
+            return $this->response->withStatus(500)->withType('json')->withStringBody(json_encode([
+                'success' => false,
+                'message' => 'The request(s) could not be saved.',
+            ]));
         }
 
         if (empty($errors)) {
+            $connection->commit();
             return $this->response->withType('json')->withStringBody(json_encode([
                 'success'         => true,
                 'ids'             => $savedIds,
@@ -245,6 +375,9 @@ class RequestTblController extends AppController
                 'attachment_path' => $attachmentPath
             ]));
         } else {
+            // Undoes every row saved in this batch and every hw_status flip that
+            // went with them, so the 400 below is actually true.
+            $connection->rollback();
             return $this->response->withStatus(400)->withType('json')->withStringBody(json_encode([
                 'success' => false,
                 'message' => 'The request(s) could not be saved.',
@@ -335,22 +468,13 @@ class RequestTblController extends AppController
             // is null by then anyway).
             $becomingCanceled = !$wasCanceled && strtoupper($requestTbl->status ?? '') === 'CANCELED';
             if ($becomingCanceled && $previousAttachment) {
-                $fullPath = WWW_ROOT . ltrim(str_replace('/', DS, $previousAttachment), DS);
-                // attachment_path is cleared below regardless of whether the
-                // unlink succeeds -- the "not viewable to anyone" guarantee is
-                // a database change (nothing in the app ever links/serves a
-                // null path again) and shouldn't depend on the filesystem
-                // delete landing. But a failed delete still leaves a real file
-                // orphaned on disk with no DB reference left to find it by, so
-                // it's logged loudly here rather than swallowed -- that log
-                // line is how an orphan like that gets noticed and cleaned up
-                // (see scripts/backfill_delete_canceled_attachments.php, which
-                // only finds rows where attachment_path is still set).
-                if (is_file($fullPath) && !@unlink($fullPath)) {
-                    \Cake\Log\Log::error(
-                        "Failed to delete attachment for canceled request #{$requestTbl->request_id}: {$fullPath}"
-                    );
-                }
+                // attachment_path is cleared below regardless of whether the file
+                // delete happens -- the "not viewable to anyone" guarantee is a
+                // database fact (nothing in the app links a null path), and it
+                // shouldn't depend on the filesystem. The file itself only goes
+                // when no sibling row from the same bulk submission still needs
+                // it; see deleteAttachmentFile().
+                $this->deleteAttachmentFile($previousAttachment, (int)$requestTbl->request_id);
                 $requestTbl->attachment_path = null;
                 if (!$this->RequestTbl->save($requestTbl)) {
                     \Cake\Log\Log::error(
@@ -398,16 +522,14 @@ class RequestTblController extends AppController
             return $this->responseJson(['success' => false, 'message' => 'No valid file uploaded']);
         }
 
-        // Validate file type
-        $allowedTypes = ['application/pdf', 'image/jpeg', 'image/png'];
-        $mimeType = $uploadedFile->getClientMediaType();
-
-        if (!in_array($mimeType, $allowedTypes)) {
-            return $this->responseJson(['success' => false, 'message' => 'Invalid file type. Only PDF, JPG, PNG allowed']);
-        }
-
-        if ($uploadedFile->getSize() > 5 * 1024 * 1024) {
-            return $this->responseJson(['success' => false, 'message' => 'File size exceeds 5MB limit']);
+        // Type is sniffed from the file's bytes, not taken from the client's
+        // Content-Type header or filename (see verifiedUploadExtension).
+        $ext = $this->verifiedUploadExtension($uploadedFile);
+        if ($ext === null) {
+            return $this->responseJson(
+                ['success' => false, 'message' => 'Attachment must be a PDF, JPEG or PNG of at most 5MB.'],
+                400
+            );
         }
 
         // Create upload path
@@ -415,19 +537,28 @@ class RequestTblController extends AppController
         $uploadSubDir = 'request_attachments' . DS . $monthYear;
         $uploadDir = WWW_ROOT . 'uploads' . DS . $uploadSubDir;
 
-        if (!is_dir($uploadDir)) {
-            mkdir($uploadDir, 0755, true);
+        if (!is_dir($uploadDir) && !mkdir($uploadDir, 0755, true) && !is_dir($uploadDir)) {
+            \Cake\Log\Log::error("Could not create upload directory: {$uploadDir}");
+            return $this->responseJson(['success' => false, 'message' => 'Failed to save uploaded file'], 500);
         }
 
+        // Captured before the row is repointed, so the file being replaced can be
+        // removed afterwards instead of being orphaned on disk with no reference.
+        $replacedAttachment = $requestTbl->attachment_path;
+
         $timestamp = date('Ymd-His');
-        $originalExt = strtolower(pathinfo($uploadedFile->getClientFilename(), PATHINFO_EXTENSION));
-        $uniqueName = 'req_' . $id . '_' . $timestamp . '_' . uniqid() . '.' . $originalExt;
+        $uniqueName = 'req_' . $id . '_' . $timestamp . '_' . uniqid() . '.' . $ext;
         $targetPath = $uploadDir . DS . $uniqueName;
 
-        $uploadedFile->moveTo($targetPath);
+        try {
+            $uploadedFile->moveTo($targetPath);
+        } catch (\Throwable $e) {
+            \Cake\Log\Log::error("Attachment moveTo failed ({$targetPath}): " . $e->getMessage());
+            return $this->responseJson(['success' => false, 'message' => 'Failed to save uploaded file'], 500);
+        }
 
         if (!file_exists($targetPath)) {
-            return $this->responseJson(['success' => false, 'message' => 'Failed to save uploaded file']);
+            return $this->responseJson(['success' => false, 'message' => 'Failed to save uploaded file'], 500);
         }
 
         $attachmentPath = '/uploads/' . str_replace(DS, '/', $uploadSubDir) . '/' . $uniqueName;
@@ -439,6 +570,12 @@ class RequestTblController extends AppController
         ]);
 
         if ($this->RequestTbl->save($requestTbl)) {
+            // Only once the row points at the new file -- if the save had failed,
+            // the old attachment is still the live one and must stay.
+            if ($replacedAttachment && $replacedAttachment !== $attachmentPath) {
+                $this->deleteAttachmentFile($replacedAttachment, (int)$requestTbl->request_id);
+            }
+
             return $this->responseJson([
                 'success' => true,
                 'message' => 'Attachment updated successfully',
@@ -451,15 +588,18 @@ class RequestTblController extends AppController
             'success' => false,
             'message' => 'Failed to update attachment',
             'errors' => $requestTbl->getErrors()
-        ]);
+        ], 400);
     }
 
     /**
      * Helper to return JSON response
      */
-    private function responseJson(array $data)
+    private function responseJson(array $data, int $status = 200)
     {
+        // Failures used to come back as HTTP 200 with success:false, so callers
+        // checking res.ok (rather than the body) read "not found" as a success.
         $this->response = $this->response->withType('application/json');
+        $this->response = $this->response->withStatus($status);
         $this->response = $this->response->withStringBody(json_encode($data));
         return $this->response;
     }

@@ -19,10 +19,12 @@ const nowStr = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
 export async function updateHardwareStatusForRequest(postData, hwId, status = 'Pullout') {
     if (!hwId) return true;
     try {
+        // No updated_at: hw_tbl has no such column (request_tbl does, which is why
+        // it's still sent on the request payloads below), so it never reached the
+        // generated SQL.
         const result = await postData('/api/hw-tbl/update.json', {
             hw_id: hwId,
             hw_status: status,
-            updated_at: nowStr(),
         });
         return result?.success || false;
     } catch (err) {
@@ -38,27 +40,31 @@ export async function duplicateHardwareForRelocation(fetchData, postData, reques
         const original = res?.hwTbl || res?.HwTbl || {};
         if (!original.hw_id) return false;
 
+        // Copy the whole record, then override only what relocating actually
+        // changes. The previous version listed ~17 fields by hand, so a relocated
+        // unit silently lost everything not on that list — memory, HDD capacity
+        // and health, OS, .NET, antivirus (incl. hw_antivi_meta), core_buid, all
+        // six facility flags, the ports counts, major/sub_major_type — and the
+        // duplicate showed up in Hardware Management as an unconfigured unit.
+        //
+        // It also wrote hw_remarks, created_at and updated_at, none of which are
+        // columns on hw_tbl, so those were dropped by the ORM; the "Relocated
+        // from X" note never reached the database.
+        const { hw_id: _omitHwId, ...carriedOver } = original;
+
         const newHwData = {
-            region_name: original.region_name || '',
+            ...carriedOver,
             site_code: request.destination_site,
-            hw_asset_num: original.hw_asset_num || '',
-            hw_serial_num: original.hw_serial_num || '',
-            item_desc: original.item_desc || '',
-            hw_brand_name: original.hw_brand_name || '',
-            hw_model: original.hw_model || '',
             hw_status: 'On Site',
-            user_id: original.user_id || 1,
-            hw_date_acq: original.hw_date_acq || new Date().toISOString().slice(0, 10),
-            hw_acq_val: original.hw_acq_val || 0,
-            hw_host_name: original.hw_host_name || `reloc-${Date.now()}`,
-            hw_ip_add: original.hw_ip_add || '0.0.0.0',
-            hw_mac_add: original.hw_mac_add || '00:00:00:00:00:00',
-            hw_user_name: original.hw_user_name || 'System',
-            hw_primary_role: original.hw_primary_role || 'User',
-            hw_remarks: original.hw_remarks || `Relocated from ${original.site_code || 'previous site'}`,
-            created_at: nowStr(),
-            updated_at: nowStr(),
         };
+
+        // Blank network identity is left blank. It used to be backfilled with
+        // '0.0.0.0' / '00:00:00:00:00:00' / `reloc-<timestamp>`, which gave every
+        // relocated unit the SAME fabricated MAC — and findNetworkDuplicate in
+        // MasterfileHardwareManagement checks MACs org-wide, so those collided
+        // with each other and blocked later edits.
+        delete newHwData.created_at;
+        delete newHwData.updated_at;
 
         const result = await postData('/api/hw-tbl/add.json', newHwData);
         return result?.success || false;

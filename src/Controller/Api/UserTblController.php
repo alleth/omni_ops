@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace App\Controller\Api;
 
 use App\Controller\AppController;
+use Cake\Database\Expression\QueryExpression;
 
 /**
  * UserTbl Controller
@@ -12,6 +13,13 @@ use App\Controller\AppController;
  */
 class UserTblController extends AppController
 {
+    /** Failed sign-ins on one account before it locks. */
+    private const MAX_FAILED_ATTEMPTS = 8;
+
+    /** How long a locked account stays locked, in seconds. */
+    private const LOCKOUT_SECONDS = 15 * 60;
+
+
     public function initialize(): void
     {
         parent::initialize();
@@ -84,6 +92,25 @@ class UserTblController extends AppController
             if (empty($data['user_pass'])) {
                 return $this->response->withStatus(400)->withType('json')
                     ->withStringBody(json_encode(['success' => false, 'error' => 'Password is required']));
+            }
+
+            // login() resolves an account with ->first(), and there is no unique
+            // index on user_name, so a duplicate name would permanently shadow the
+            // second account: that user could never sign in, with nothing in the
+            // UI to explain why.
+            $userName = trim((string)($data['user_name'] ?? ''));
+            if ($userName === '') {
+                return $this->response->withStatus(400)->withType('json')
+                    ->withStringBody(json_encode(['success' => false, 'error' => 'Username is required']));
+            }
+
+            $taken = $this->UserTbl->find()->where(['TRIM(user_name)' => $userName])->count();
+            if ($taken > 0) {
+                return $this->response->withStatus(409)->withType('json')
+                    ->withStringBody(json_encode([
+                        'success' => false,
+                        'error'   => "Username '{$userName}' is already taken.",
+                    ]));
             }
 
             $data['user_pass'] = password_hash($data['user_pass'], PASSWORD_DEFAULT);
@@ -277,6 +304,61 @@ class UserTblController extends AppController
     }
 
     /**
+     * Is this account currently locked?
+     *
+     * The comparison runs in SQL so both sides of it come from MySQL's clock.
+     * See the note in login() for why a PHP-side comparison is wrong here.
+     */
+    private function isLockedOut(int $userId): bool
+    {
+        return $this->UserTbl->find()
+            ->where(['id' => $userId])
+            ->where('lockout_until IS NOT NULL AND lockout_until > NOW()')
+            ->count() > 0;
+    }
+
+    /**
+     * Clears the failure counter and any (possibly expired) lock.
+     *
+     * updateAll rather than an entity save: these two columns are all that
+     * changes, and it keeps the write off the entity that login() also saves
+     * last_active on.
+     */
+    private function clearLoginAttempts(int $userId): void
+    {
+        $this->UserTbl->updateAll(
+            ['failed_attempts' => 0, 'lockout_until' => null],
+            ['id' => $userId]
+        );
+    }
+
+    /**
+     * Counts one failed sign-in, locking the account once the threshold is hit.
+     * The lock expiry is computed by MySQL (DATE_ADD(NOW(), ...)) so it lands in
+     * the same time frame the isLockedOut() check reads it back in.
+     */
+    private function recordFailedLogin(int $userId, int $currentAttempts): void
+    {
+        $next = $currentAttempts + 1;
+
+        if ($next >= self::MAX_FAILED_ATTEMPTS) {
+            $this->UserTbl->updateQuery()
+                ->set([
+                    'failed_attempts' => 0,
+                    'lockout_until' => new QueryExpression(
+                        'DATE_ADD(NOW(), INTERVAL ' . self::LOCKOUT_SECONDS . ' SECOND)'
+                    ),
+                ])
+                ->where(['id' => $userId])
+                ->execute();
+
+            return;
+        }
+
+        $this->UserTbl->updateAll(['failed_attempts' => $next], ['id' => $userId]);
+    }
+
+    /**
      * Presence heartbeat — called periodically by the logged-in frontend
      * (MasterfileLayout) while a session is open. Stamps last_active so the
      * Users tab can show online/offline. Deliberately lightweight: no auth
@@ -318,7 +400,14 @@ class UserTblController extends AppController
 
     public function edit($id = null)
     {
-        $userTbl = $this->UserTbl->get($id);
+        try {
+            $userTbl = $this->UserTbl->get($id);
+        } catch (\Cake\Datasource\Exception\RecordNotFoundException $e) {
+            // Unguarded, a bad id surfaced as an uncaught exception -> HTTP 500,
+            // which a client can't tell apart from a real server fault.
+            return $this->response->withStatus(404)->withType('json')
+                ->withStringBody(json_encode(['success' => false, 'error' => 'User not found']));
+        }
 
         if ($this->request->accepts('application/json')) {
             if ($this->request->is(['post', 'patch', 'put'])) {
@@ -403,13 +492,41 @@ class UserTblController extends AppController
         $this->request->allowMethod(['post']);
         $data = $this->request->getData();
 
+        $userName = $data['user_name'] ?? '';
+        $userPass = $data['user_pass'] ?? '';
+
+        if ($userName === '' || $userPass === '') {
+            return $this->response->withType('json')->withStatus(401)
+                ->withStringBody(json_encode(['error' => 'Invalid credentials']));
+        }
+
         $user = $this->UserTbl->find()
-            ->where(['user_name' => $data['user_name']])
+            ->where(['user_name' => $userName])
             ->first();
 
         $response = $this->response->withType('json');
 
-        if ($user && password_verify($data['user_pass'], $user->user_pass)) {
+        // user_tbl has carried failed_attempts/lockout_until since the table was
+        // created, and add()/resetPassword() dutifully reset them -- but nothing
+        // ever incremented or checked either one, so there was no brute-force
+        // protection at all. Enforced here.
+        //
+        // Whether the lock is still live is decided by MySQL against its own
+        // clock, never by comparing a PHP timestamp to the stored value:
+        // lockout_until is a TIMESTAMP column (last_active, right next to it, is
+        // a DATETIME), and MySQL converts TIMESTAMP on both read and write using
+        // the session time zone -- which here is Asia/Manila while the app runs
+        // in UTC. Writing gmdate() digits and comparing them in PHP made a
+        // 15-minute lock read as 8h15m. Same trap CLAUDE.md flags for
+        // last_active, opposite direction.
+        if ($user && $this->isLockedOut((int)$user->id)) {
+            return $response->withStatus(429)->withStringBody(json_encode([
+                'error' => 'Account temporarily locked after too many failed sign-in attempts. Try again later.',
+            ]));
+        }
+
+        if ($user && password_verify($userPass, $user->user_pass)) {
+            $this->clearLoginAttempts((int)$user->id);
             // Stamp online status immediately on login — the frontend heartbeat
             // (MasterfileLayout) keeps it fresh from here on for as long as a
             // session stays open.
@@ -445,6 +562,12 @@ class UserTblController extends AppController
                 ]
             ]));
         } else {
+            // Counted only for a real account; an unknown username gets the same
+            // generic 401 so the response doesn't reveal which names exist.
+            if ($user) {
+                $this->recordFailedLogin((int)$user->id, (int)($user->failed_attempts ?? 0));
+            }
+
             $response = $response->withStatus(401)
                 ->withStringBody(json_encode(['error' => 'Invalid credentials']));
         }

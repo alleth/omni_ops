@@ -1,0 +1,20 @@
+# This directory holds user-supplied files served straight off disk by Apache.
+# Nothing in here should ever be executed as code.
+<IfModule mod_php7.c>
+    php_flag engine off
+</IfModule>
+<IfModule mod_php.c>
+    php_flag engine off
+</IfModule>
+
+RemoveHandler .php .phtml .php3 .php4 .php5 .php7 .phps .cgi .pl .py .jsp .asp .shtml
+RemoveType .php .phtml .php3 .php4 .php5 .php7 .phps .cgi .pl .py .jsp .asp .shtml
+AddType text/plain .php .phtml .php3 .php4 .php5 .php7 .phps .cgi .pl .py .jsp .asp .shtml
+
+<IfModule mod_mime.c>
+    AddType image/jpeg .jfif
+</IfModule>
+
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+</IfModule>
