@@ -147,17 +147,19 @@ function MasterfileLanding() {
 
         const loadData = async () => {
             try {
-                const [regionsData, sitesData, hardwareData] = await Promise.all([
-                    fetchData('/api/region-tbl.json'),
-                    fetchData('/api/site-list-tbl.json'),
-                    fetchData('/api/hw-tbl.json')
-                ]);
+                // This page is public (no session), so it reads from the one
+                // endpoint built for it rather than the full region/site/hw-tbl
+                // dumps it used to call. /api/hw-tbl.json returns every column of
+                // all ~18,250 rows — serials, asset tags, IPs, MACs, hostnames,
+                // usernames — and this page needs eight harmless ones. Same data
+                // shape, one round trip instead of three, ~85KB gzipped vs ~500KB.
+                const summary = await fetchData('/api/public/summary.json');
 
-                setRegions(regionsData?.regionTbl || []);
-                setAllSites(sitesData?.siteListTbl || []);
+                setRegions(summary?.regions || []);
+                setAllSites(summary?.sites || []);
                 setRegionsAndSitesReady(true);
 
-                setAllHardware(hardwareData?.hwTbl || []);
+                setAllHardware(summary?.hardware || []);
                 setHardwareReady(true);
             } catch (err) {
                 console.error('Failed to load data:', err);
