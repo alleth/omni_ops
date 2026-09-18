@@ -44,6 +44,17 @@ class PublicController extends ApiController
         'os_type',
         'hw_status',
         'hw_date_acq',
+        // Facility flags behind the landing page's "Utilities" card. Easy to miss:
+        // utilitiesData reads them as h[util.key] from a list of string keys, so
+        // they do not appear in a grep for `h.<field>` — which is how they were
+        // left out of the first version of this list, quietly zeroing that card.
+        // Booleans, no identifying content.
+        'rsu_fac',
+        'mv_dto',
+        'mv_maint',
+        'ims_aiu',
+        'dl_dto',
+        'dl_maint',
     ];
 
     private const SITE_FIELDS = [
