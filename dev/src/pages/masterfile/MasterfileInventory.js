@@ -126,6 +126,30 @@ const SkeletonTableCard = () => (
 );
 
 // Minimalist Toast Component
+// Shared portal target. Modals render here, so anything that must appear ABOVE a
+// modal has to render here too — see TOAST_Z below.
+const getModalRoot = () => {
+    let root = document.getElementById('modal-root');
+    if (!root) {
+        root = document.createElement('div');
+        root.id = 'modal-root';
+        document.body.appendChild(root);
+    }
+    return root;
+};
+
+// Above every modal layer in the app (modals use z-[9999]; RequestDetailModal's
+// reject confirmation stacks to z-[10000]). Toasts are the one thing that must
+// outrank all of them: the duplicate-asset/serial warning fires while the Add
+// Hardware modal is still open — the modal deliberately stays up so the values
+// can be corrected — and at the old z-[60], rendered inline in the page tree, it
+// came out UNDER that modal's `bg-black/60 backdrop-blur-sm` overlay. The message
+// was dimmed and blurred to the point of being unreadable, which is exactly when
+// it matters most. Raising z-index alone is not enough: the modal is portaled
+// into #modal-root, which sits after the app root in the DOM, so an inline toast
+// loses on stacking order regardless of its z-index. It has to be portaled too.
+const TOAST_Z = 'z-[10050]';
+
 const Toast = ({ message, type = 'error', onClose }) => {
     const bgColor = type === 'error'
         ? 'bg-red-50 dark:bg-red-900/30 border-red-200 dark:border-red-800 text-red-800 dark:text-red-200'
@@ -136,11 +160,12 @@ const Toast = ({ message, type = 'error', onClose }) => {
         return () => clearTimeout(timer);
     }, [onClose]);
 
-    return (
-        <div className={`fixed top-6 right-6 z-[60] p-4 rounded-xl border shadow-xl max-w-lg ${bgColor} flex items-start gap-3 text-sm`}>
+    return createPortal(
+        <div className={`fixed top-6 right-6 ${TOAST_Z} p-4 rounded-xl border shadow-xl max-w-lg ${bgColor} flex items-start gap-3 text-sm`}>
             <div className="flex-1 whitespace-pre-wrap leading-relaxed">{message}</div>
             <button onClick={onClose} className="text-sm font-medium opacity-70 hover:opacity-100 transition-opacity">×</button>
-        </div>
+        </div>,
+        getModalRoot()
     );
 };
 

@@ -823,13 +823,21 @@ function MasterfileUsers() {
                 )}
             </div>
 
-            {/* Toast */}
-            {toast && (
-                <div className={`fixed bottom-6 right-6 z-50 px-5 py-3 rounded-xl shadow-lg text-sm font-medium text-white transition-all ${
+            {/* Toast — portaled above the modals for the same reason as the one in
+                MasterfileInventory: every modal on this page is portaled into
+                #modal-root at z-50, and a portal sits after the app root in the
+                DOM, so an inline toast at the same z-index loses on stacking order
+                and ends up behind the modal's bg-black/60 overlay. That hid the
+                failure messages that matter most — "Username is already taken",
+                a failed password reset — because those fire while the modal that
+                triggered them is still open. */}
+            {toast && createPortal(
+                <div className={`fixed bottom-6 right-6 z-[10050] px-5 py-3 rounded-xl shadow-lg text-sm font-medium text-white transition-all whitespace-pre-wrap max-w-md ${
                     toast.type === 'error' ? 'bg-red-600' : 'bg-green-600'
                 }`}>
                     {toast.message}
-                </div>
+                </div>,
+                document.getElementById('modal-root') || document.body
             )}
 
             {/* Modals */}
