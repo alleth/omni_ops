@@ -2,7 +2,9 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useApi } from '../../hooks/useApi';
 
 function MasterfileProfile() {
-    const { fetchData, postData, loading: apiLoading, error: apiError } = useApi();
+    // Only fetchData is used here — the save below is a raw fetch so that the
+    // server's specific error text survives (see the note at that call site).
+    const { fetchData } = useApi();
 
     const storedUser = sessionStorage.getItem('user');
     const user = useMemo(
@@ -152,14 +154,30 @@ function MasterfileProfile() {
                 payload.new_password = form.new_password.trim();
             }
 
-            const res = await fetch('http://omniops.local/api/user-tbl/update-profile', {
+            // Relative URL, NOT the hardcoded http://omniops.local this used to
+            // carry. That hostname only resolves on machines with the hosts-file
+            // entry, so on the production VM (served from http://192.168.4.95:8888)
+            // every save failed in the browser before it ever reached the server —
+            // the request never resolved, the catch below fired, and the user got
+            // the generic "Failed to save profile. Please try again." The backend
+            // was fine the whole time.
+            //
+            // Relative works everywhere: same-origin in production, and the CRA
+            // proxy forwards /api to omniops.local in development — which is why
+            // every useApi call already uses relative paths. See MasterfileLogin's
+            // getApiBase() for the same problem solved a different way.
+            //
+            // Kept as a raw fetch rather than useApi's postData because postData
+            // swallows non-2xx responses and returns null, which would turn
+            // "Current password is incorrect" into a generic "Update failed".
+            const res = await fetch('/api/user-tbl/update-profile.json', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     Accept: 'application/json',
                 },
                 body: JSON.stringify(payload),
-                // credentials: 'include',
+                credentials: 'include',
             });
 
             const result = await res.json();
