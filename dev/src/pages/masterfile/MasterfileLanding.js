@@ -231,7 +231,9 @@ function MasterfileLanding() {
         return {
             totalSites: filteredDataSites.length,
             cpuServers: onSiteCpuServers.length,
-            dualServerSites: Math.floor(filteredDataSites.filter(s => String(s.physical_site_count || '').trim() === '2').length / 2),
+            // One row per site (site_code is unique), so a dual-server site is a single row
+            // with physical_site_count of 2 — not two rows to be halved.
+            dualServerSites: filteredDataSites.filter(s => String(s.physical_site_count || '').trim() === '2').length,
             onSiteHardware: filteredDataHardware.filter(h => ['on site', 'onsite'].includes(String(h.hw_status || '').trim().toLowerCase()) && String(h.item_desc || '').trim().toLowerCase() !== 'vm-server').length,
             vmServers: filteredDataHardware.filter(h => String(h.item_desc || '').trim().toLowerCase() === 'vm-server' && ['on site', 'onsite'].includes(String(h.hw_status || '').trim().toLowerCase())).length,
         };
