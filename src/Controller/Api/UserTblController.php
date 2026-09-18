@@ -118,23 +118,10 @@ class UserTblController extends ApiController
                     ->withStringBody(json_encode(['success' => false, 'error' => 'Password is required']));
             }
 
-            // login() resolves an account with ->first(), and there is no unique
-            // index on user_name, so a duplicate name would permanently shadow the
-            // second account: that user could never sign in, with nothing in the
-            // UI to explain why.
-            $userName = trim((string)($data['user_name'] ?? ''));
-            if ($userName === '') {
-                return $this->response->withStatus(400)->withType('json')
-                    ->withStringBody(json_encode(['success' => false, 'error' => 'Username is required']));
-            }
-
-            $taken = $this->UserTbl->find()->where(['TRIM(user_name)' => $userName])->count();
-            if ($taken > 0) {
-                return $this->response->withStatus(409)->withType('json')
-                    ->withStringBody(json_encode([
-                        'success' => false,
-                        'error'   => "Username '{$userName}' is already taken.",
-                    ]));
+            // No $exceptId: nothing exists yet to exclude.
+            $denied = $this->rejectIfUsernameTaken($data);
+            if ($denied !== null) {
+                return $denied;
             }
 
             $data['user_pass'] = password_hash($data['user_pass'], PASSWORD_DEFAULT);
@@ -322,6 +309,55 @@ class UserTblController extends ApiController
      * always reads as "online". Plain UTC in, UTC-tagged ISO out, browser
      * converts to local for free — keep it that way.
      */
+    /**
+     * Rejects a write that would put two accounts on the same username.
+     *
+     * There is no unique index on `user_tbl.user_name`, and `login()` resolves an
+     * account with `->first()`, so a duplicate permanently shadows whichever row
+     * sorts second: that user simply stops being able to sign in, with nothing in
+     * the UI to explain why. Enforced in application code because the database
+     * does not enforce it.
+     *
+     * @param array<string, mixed> $data     request body
+     * @param int|null             $exceptId row being updated, excluded from the
+     *                                       check — an update normally resubmits
+     *                                       the user's own unchanged username, and
+     *                                       without this it would match itself and
+     *                                       block every save. Null when creating.
+     * @return \Cake\Http\Response|null null when the name is free
+     */
+    private function rejectIfUsernameTaken(array $data, ?int $exceptId = null)
+    {
+        if (!array_key_exists('user_name', $data)) {
+            return null;
+        }
+
+        $name = trim((string)$data['user_name']);
+
+        if ($name === '') {
+            return $this->response->withStatus(400)->withType('json')
+                ->withStringBody(json_encode([
+                    'success' => false,
+                    'error' => 'Username is required',
+                ]));
+        }
+
+        $query = $this->UserTbl->find()->where(['TRIM(user_name)' => $name]);
+        if ($exceptId !== null) {
+            $query->where(['id !=' => $exceptId]);
+        }
+
+        if ($query->count() > 0) {
+            return $this->response->withStatus(409)->withType('json')
+                ->withStringBody(json_encode([
+                    'success' => false,
+                    'error' => "Username '{$name}' is already taken.",
+                ]));
+        }
+
+        return null;
+    }
+
     private function nowForPresence(): string
     {
         return gmdate('Y-m-d H:i:s');
@@ -436,6 +472,14 @@ class UserTblController extends ApiController
         if ($this->request->accepts('application/json')) {
             if ($this->request->is(['post', 'patch', 'put'])) {
                 $data = $this->request->getData();
+
+                // Same guard as add() and updateProfile(). This action has no
+                // caller in the frontend, but the /api fallbacks route still
+                // exposes it, and it patches user_name straight through.
+                $denied = $this->rejectIfUsernameTaken($data, (int)$userTbl->id);
+                if ($denied !== null) {
+                    return $denied;
+                }
 
                 if (!empty($data['current_password'])) {
                     if (!password_verify($data['current_password'], $userTbl->user_pass)) {
@@ -620,6 +664,14 @@ class UserTblController extends ApiController
 
         try {
             $user = $this->UserTbl->get($userId);
+
+            // The profile form always resubmits user_name, usually unchanged, which
+            // is exactly why the helper excludes this user's own row — otherwise
+            // every save would collide with itself.
+            $denied = $this->rejectIfUsernameTaken($data, (int)$user->id);
+            if ($denied !== null) {
+                return $denied;
+            }
 
             if (!empty($data['current_password'])) {
                 if (!password_verify($data['current_password'], $user->user_pass)) {
