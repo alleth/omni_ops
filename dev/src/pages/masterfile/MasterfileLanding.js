@@ -231,9 +231,13 @@ function MasterfileLanding() {
         return {
             totalSites: filteredDataSites.length,
             cpuServers: onSiteCpuServers.length,
-            // One row per site (site_code is unique), so a dual-server site is a single row
-            // with physical_site_count of 2 — not two rows to be halved.
-            dualServerSites: filteredDataSites.filter(s => String(s.physical_site_count || '').trim() === '2').length,
+            // Counts OFFICES, not site codes. A dual-server office is one physical location
+            // with two servers, and it is registered as TWO site_list_tbl rows — one site_code
+            // per server — both flagged physical_site_count = 2. The pair shares an address,
+            // not a site_name (e.g. 1328 "Makati DO" + 1329 "Makati LC", both Butel Bldg.),
+            // so the rows look like distinct sites unless you compare addresses. Hence /2.
+            // Rows pair up evenly in every region, so Math.floor never actually truncates.
+            dualServerSites: Math.floor(filteredDataSites.filter(s => String(s.physical_site_count || '').trim() === '2').length / 2),
             onSiteHardware: filteredDataHardware.filter(h => ['on site', 'onsite'].includes(String(h.hw_status || '').trim().toLowerCase()) && String(h.item_desc || '').trim().toLowerCase() !== 'vm-server').length,
             vmServers: filteredDataHardware.filter(h => String(h.item_desc || '').trim().toLowerCase() === 'vm-server' && ['on site', 'onsite'].includes(String(h.hw_status || '').trim().toLowerCase())).length,
         };
