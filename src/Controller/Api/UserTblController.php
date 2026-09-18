@@ -3,7 +3,6 @@ declare(strict_types=1);
 
 namespace App\Controller\Api;
 
-use App\Controller\AppController;
 use Cake\Database\Expression\QueryExpression;
 
 /**
@@ -11,7 +10,7 @@ use Cake\Database\Expression\QueryExpression;
  *
  * @property \App\Model\Table\UserTblTable $UserTbl
  */
-class UserTblController extends AppController
+class UserTblController extends ApiController
 {
     /** Failed sign-ins on one account before it locks. */
     private const MAX_FAILED_ATTEMPTS = 8;
@@ -26,10 +25,29 @@ class UserTblController extends AppController
         $this->loadComponent('RequestHandler');
     }
 
+    /**
+     * Phase 1 of API authorization. These are the account-takeover endpoints:
+     * before this map existed, an unauthenticated POST to reset-password could
+     * set any account's password, including an ADM's.
+     *
+     * login() is deliberately absent — it is how a session is obtained. index()
+     * and view() are left open for now; Phase 2 closes the remaining actions.
+     *
+     * @return array<string, array<int, string>>
+     */
+    protected function protectedActions(): array
+    {
+        return [
+            'add' => ['ADM', 'SPV'],
+            'resetPassword' => ['ADM', 'SPV'],
+            'updateRole' => ['ADM'],
+            'updateRegion' => ['ADM', 'SPV'],
+            'delete' => ['ADM'],
+        ];
+    }
+
     public function beforeFilter(\Cake\Event\EventInterface $event)
     {
-        parent::beforeFilter($event);
-
         $origin = $this->request->getHeaderLine('Origin') ?: '*';
 
         if ($this->request->is('options')) {
@@ -51,7 +69,13 @@ class UserTblController extends AppController
             ->withHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, PATCH, DELETE')
             ->withHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With')
             ->withHeader('Vary', 'Origin');
+
+        // CORS headers are set above first so a 401/403 still carries them.
+        // The return value MUST be passed through: discarding it (as this method
+        // previously did) would run the action even when the check rejected it.
+        return parent::beforeFilter($event);
     }
+
     public function index()
     {
         $this->request->allowMethod(['get']);

@@ -3,10 +3,24 @@ declare(strict_types=1);
 
 namespace App\Controller\Api;
 
-use App\Controller\AppController;
-
-class SiteListTblController extends AppController
+class SiteListTblController extends ApiController
 {
+    /**
+     * Phase 1: destructive action only. Deleting a site strands every hardware
+     * row carrying its site_code (the schema has no foreign keys), so this is
+     * the one site action worth closing first. ROO is excluded because the
+     * Directory already hides delete from it — the others keep the access the
+     * UI grants them today.
+     *
+     * @return array<string, array<int, string>>
+     */
+    protected function protectedActions(): array
+    {
+        return [
+            'delete' => ['ADM', 'SPV', 'FSE'],
+        ];
+    }
+
     public function initialize(): void
     {
         parent::initialize();
@@ -16,9 +30,7 @@ class SiteListTblController extends AppController
 
     public function beforeFilter(\Cake\Event\EventInterface $event)
     {
-        parent::beforeFilter($event);
-
-        // CORS headers (keep your existing)
+        // CORS headers set first so a 401/403 still carries them.
         $origin = $this->request->getHeaderLine('Origin') ?: '*';
         $this->response = $this->response
             ->withHeader('Access-Control-Allow-Origin', $origin)
@@ -28,6 +40,9 @@ class SiteListTblController extends AppController
         if ($this->request->is('options')) {
             return $this->response;
         }
+
+        // Must be returned, not discarded, or a rejected request runs anyway.
+        return parent::beforeFilter($event);
     }
 
     public function index()

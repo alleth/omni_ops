@@ -3,11 +3,28 @@ declare(strict_types=1);
 
 namespace App\Controller\Api;
 
-use App\Controller\AppController;
 use Cake\Datasource\Exception\RecordNotFoundException;
 
-class HwTblController extends AppController
+class HwTblController extends ApiController
 {
+    /**
+     * Phase 1: destructive action only. Hardware delete is not reachable from any
+     * UI (Inventory exposes add/edit but no delete), so requiring a session here
+     * cannot break a real caller — but the endpoint was fully open, and a single
+     * unauthenticated DELETE removed a hardware record permanently.
+     *
+     * Any signed-in user for now rather than a role list: with no UI caller to
+     * check against, narrowing further would be guesswork. Phase 2 revisits it.
+     *
+     * @return array<string, array<int, string>>
+     */
+    protected function protectedActions(): array
+    {
+        return [
+            'delete' => [self::ANY_AUTHENTICATED],
+        ];
+    }
+
     public function initialize(): void
     {
         parent::initialize();
@@ -17,9 +34,7 @@ class HwTblController extends AppController
 
     public function beforeFilter(\Cake\Event\EventInterface $event)
     {
-        parent::beforeFilter($event);
-
-        // Global CORS headers
+        // Global CORS headers — set before the auth check so a 401/403 carries them.
         $origin = $this->request->getHeaderLine('Origin') ?: '*';
         $this->response = $this->response
             ->withHeader('Access-Control-Allow-Origin', $origin)
@@ -31,6 +46,9 @@ class HwTblController extends AppController
         if ($this->request->is('options')) {
             return $this->response->withStatus(200);
         }
+
+        // Must be returned, not discarded, or a rejected request runs anyway.
+        return parent::beforeFilter($event);
     }
 
     public function index()
