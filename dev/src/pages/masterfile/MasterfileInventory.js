@@ -126,6 +126,76 @@ const SkeletonTableCard = () => (
 );
 
 // Minimalist Toast Component
+// Renders "NCR → 1328 – Makati DO" for a hardware row, for the duplicate-entry
+// warnings. Shared by the add and edit handlers, which built this string
+// identically in two places.
+//
+// The fallback chain matters: the duplicate check searches hardware ORG-WIDE
+// while the viewer is usually scoped to a couple of regions, so the conflicting
+// record is often somewhere the user cannot otherwise see. `regionMap` now covers
+// every region, but the chain guards the remaining gaps rather than letting
+// `undefined` reach the message.
+//
+// Note `hw.region_name` is used as a region *id* deliberately — despite the name,
+// that column stores region IDs (verified: all 18,249 rows match a region_id and
+// none match a region_name), so it is only useful once resolved through the map.
+const describeHardwareLocation = (hw, siteMap, regionMap) => {
+    const site = siteMap[hw?.site_code];
+
+    const regionName =
+        (site && regionMap[String(site.region_id)]) ||
+        regionMap[String(hw?.region_name ?? '')] ||
+        'Unknown Region';
+
+    const siteInfo = site
+        ? `${site.site_code} – ${site.site_name || 'Unnamed'}`
+        : (hw?.site_code || 'Unknown Site');
+
+    return `${regionName} → ${siteInfo}`;
+};
+
+// Builds the duplicate-entry warning shown by both the add and edit handlers.
+//
+// Reports EVERY conflicting field, not just the first. It previously picked
+// `duplicateAsset || duplicateSerial`, so when both clashed the user fixed the
+// asset number, resubmitted, and only then learned the serial clashed too — a
+// second round trip that re-downloads the whole hardware table to find out.
+//
+// Identifies the conflicting record by its asset/serial rather than the internal
+// hw_id the message used to print, which told the user nothing actionable.
+const buildDuplicateMessage = ({
+    duplicateAsset,
+    duplicateSerial,
+    newAssetNum,
+    newSerialNum,
+    siteMap,
+    regionMap,
+    prefix = '',
+}) => {
+    const conflicts = [];
+    if (duplicateAsset) conflicts.push({ label: 'Asset No', value: newAssetNum, record: duplicateAsset });
+    if (duplicateSerial) conflicts.push({ label: 'Serial No', value: newSerialNum, record: duplicateSerial });
+
+    const blocks = conflicts.map(({ label, value, record }) => {
+        const identifier = [
+            record.hw_asset_num?.trim() && `asset ${record.hw_asset_num.trim()}`,
+            record.hw_serial_num?.trim() && `serial ${record.hw_serial_num.trim()}`,
+        ].filter(Boolean).join(', ') || 'no asset/serial on file';
+
+        return (
+            `${label} "${value}" is already in use (${record.hw_status}).\n` +
+            `   at ${describeHardwareLocation(record, siteMap, regionMap)}\n` +
+            `   existing record: ${identifier}`
+        );
+    });
+
+    const isPlural = conflicts.length > 1;
+    const heading = isPlural ? 'Duplicate values found' : 'Duplicate value found';
+    const advice = isPlural ? 'Please use different values.' : 'Please use a different value.';
+
+    return `${prefix}${heading}:\n\n${blocks.join('\n\n')}\n\n${advice}`;
+};
+
 // Shared portal target. Modals render here, so anything that must appear ABOVE a
 // modal has to render here too — see TOAST_Z below.
 const getModalRoot = () => {
@@ -1053,6 +1123,12 @@ function MasterfileInventory() {
     const [allHardware, setAllHardware] = useState([]);
     const [allSites, setAllSites] = useState([]);
     const [availableRegions, setAvailableRegions] = useState([]);
+    // Every region, unfiltered by role. Kept separate from availableRegions,
+    // which is the user's SCOPE and drives the filter dropdown. This one exists
+    // purely to resolve a region_id to a name for display — including for records
+    // outside the user's scope, which the duplicate check below surfaces because
+    // it searches hardware org-wide.
+    const [allRegions, setAllRegions] = useState([]);
     const [allowedRegionIds, setAllowedRegionIds] = useState([]);
 
     const [selectedRegion, setSelectedRegion] = useState('');
@@ -1154,6 +1230,7 @@ function MasterfileInventory() {
 
                 const regionIds = allowedRegions.map(r => String(r.region_id));
 
+                setAllRegions(regionRes.regionTbl || []);
                 setAvailableRegions(allowedRegions);
                 setAllowedRegionIds(regionIds);
 
@@ -1259,11 +1336,18 @@ function MasterfileInventory() {
         return map;
     }, [allSites]);
 
+    // Built from ALL regions, not just the user's own. This is a display lookup
+    // (id -> name) and every consumer uses it that way; scoping lives in
+    // `availableRegions`, which still drives the region dropdown and what the
+    // user can pick. Built from the scoped list, this silently returned undefined
+    // for any record outside the user's regions — and the duplicate-entry check
+    // searches hardware org-wide, so an FSE (scoped to 1–2 of 18 regions) hitting
+    // a conflict in another region got "Location: undefined → 0912 – Ipil DO".
     const regionMap = useMemo(() => {
         const map = {};
-        availableRegions.forEach(r => { map[String(r.region_id)] = r.region_name; });
+        allRegions.forEach(r => { map[String(r.region_id)] = r.region_name; });
         return map;
-    }, [availableRegions]);
+    }, [allRegions]);
 
     const filteredSites = selectedRegion
         ? allSites.filter(site => String(site.region_id) === selectedRegion)
@@ -1653,19 +1737,15 @@ function MasterfileInventory() {
 
                 if (duplicateAsset || duplicateSerial) {
                     hasDuplicate = true;
-                    const duplicate = duplicateAsset || duplicateSerial;
-                    const field = duplicateAsset ? 'Asset No' : 'Serial No';
-                    const value = duplicateAsset ? newAssetNum : newSerialNum;
-
-                    const site = siteMap[duplicate.site_code];
-                    const regionName = site ? regionMap[String(site.region_id)] : 'Unknown Region';
-                    const siteInfo = site ? `${site.site_code} – ${site.site_name || 'Unnamed'}` : duplicate.site_code || 'Unknown Site';
-
                     showToast(
-                        `Duplicate ${field}: "${value}" already exists with active status (${duplicate.hw_status}).\n` +
-                        `Location: ${regionName} → ${siteInfo}\n` +
-                        `Existing record ID: ${duplicate.hw_id || 'unknown'}\n\n` +
-                        `Please use a different ${field.toLowerCase()}.`,
+                        buildDuplicateMessage({
+                            duplicateAsset,
+                            duplicateSerial,
+                            newAssetNum,
+                            newSerialNum,
+                            siteMap,
+                            regionMap,
+                        }),
                         'error'
                     );
                 }
@@ -1767,19 +1847,16 @@ function MasterfileInventory() {
 
                 if (duplicateAsset || duplicateSerial) {
                     hasDuplicate = true;
-                    const duplicate = duplicateAsset || duplicateSerial;
-                    const field = duplicateAsset ? 'Asset No' : 'Serial No';
-                    const value = duplicateAsset ? newAssetNum : newSerialNum;
-
-                    const site = siteMap[duplicate.site_code];
-                    const regionName = site ? regionMap[String(site.region_id)] : 'Unknown Region';
-                    const siteInfo = site ? `${site.site_code} – ${site.site_name || 'Unnamed'}` : duplicate.site_code || 'Unknown Site';
-
                     showToast(
-                        `Cannot update: Duplicate ${field}: "${value}" already exists with active status (${duplicate.hw_status}).\n` +
-                        `Location: ${regionName} → ${siteInfo}\n` +
-                        `Existing record ID: ${duplicate.hw_id || 'unknown'}\n\n` +
-                        `Please use a different ${field.toLowerCase()}.`,
+                        buildDuplicateMessage({
+                            duplicateAsset,
+                            duplicateSerial,
+                            newAssetNum,
+                            newSerialNum,
+                            siteMap,
+                            regionMap,
+                            prefix: 'Cannot update: ',
+                        }),
                         'error'
                     );
                 }
